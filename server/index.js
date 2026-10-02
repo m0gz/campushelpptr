@@ -492,7 +492,10 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
     return res.json({ message: 'Ticket updated successfully.', ticket: updatedTicket });
   } catch (error) {
     console.error('Ticket patch error:', error);
-    return res.status(500).json({ message: 'The ticket could not be updated.' });
+    return res.status(500).json({
+      message: 'The ticket could not be updated.',
+      diagnosticCode: error.code || 'INTERNAL_ERROR'
+    });
   }
 });
 

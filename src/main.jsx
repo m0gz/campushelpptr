@@ -54,7 +54,8 @@ async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     const detail = data.message || responseText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
-    throw new Error(detail || `Request failed (HTTP ${response.status} ${response.statusText}).`);
+    const diagnosticCode = data.diagnosticCode ? ` (code ${data.diagnosticCode})` : '';
+    throw new Error(`${detail || `Request failed (HTTP ${response.status} ${response.statusText}).`}${diagnosticCode}`);
   }
 
   return data;
