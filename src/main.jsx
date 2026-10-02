@@ -191,6 +191,7 @@ function Shell({ role, children }) {
     Administrator: [
       ['Dashboard', '/admin/dashboard', '⌂'],
       ['Tickets', '/admin/tickets', '▣'],
+      ['IT Staff', '/admin/staff', '♙'],
       ['Analytics', '/admin/analytics', '◫'],
       ['Notifications', '/admin/notifications', '◌'],
       ['Profile', '/admin/profile', '◍']
@@ -373,7 +374,7 @@ function Dashboard({ role }) {
 
   return (
     <>
-      <PageHead eyebrow={role === 'Administrator' ? 'ADMINISTRATION' : 'OVERVIEW'} title={role === 'Administrator' ? 'CampusHelp Analytics' : `Welcome back, ${(user?.full_name || 'User').split(' ')[0]}`} description={role === 'Administrator' ? 'A clear view of your department’s support operations.' : 'Here’s what is happening with your support requests today.'} action={role === 'User' && <Link className="button primary" to="/user/create-ticket">＋ Create New Ticket</Link>} />
+      <PageHead eyebrow={role === 'Administrator' ? 'ADMINISTRATION' : 'OVERVIEW'} title={role === 'Administrator' ? 'CampusHelp Analytics' : `Welcome back, ${(user?.full_name || 'User').split(' ')[0]}`} description={role === 'Administrator' ? 'A clear view of your department’s support operations.' : 'Here’s what is happening with your support requests today.'} action={role === 'User' ? <Link className="button primary" to="/user/create-ticket">＋ Create New Ticket</Link> : role === 'Administrator' ? <Link className="button primary" to="/admin/staff">＋ Add IT Staff</Link> : null} />
       <div className="stat-grid">
         {statCards.map((card) => (
           <div className="stat-card" key={card.label}>
@@ -798,6 +799,153 @@ function AdminAnalyticsPage() {
   );
 }
 
+function AdminStaffPage() {
+  const [staff, setStaff] = useState([]);
+  const [form, setForm] = useState({ full_name: '', email: '', employee_id: '', department: '' });
+  const [createdAccount, setCreatedAccount] = useState(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  async function loadStaff() {
+    try {
+      const data = await apiFetch('/api/admin/staff');
+      setStaff(data.staff || []);
+    } catch (loadError) {
+      setError(loadError.message);
+    }
+  }
+
+  useEffect(() => {
+    loadStaff();
+  }, []);
+
+  async function createStaff(event) {
+    event.preventDefault();
+    setError('');
+    setCreatedAccount(null);
+
+    try {
+      const data = await apiFetch('/api/admin/staff', {
+        method: 'POST',
+        body: JSON.stringify(form)
+      });
+      setCreatedAccount({ ...data.staff, temporaryPassword: data.temporaryPassword });
+      setStaff((current) => [...current, data.staff].sort((first, second) => first.full_name.localeCompare(second.full_name)));
+      setForm({ full_name: '', email: '', employee_id: '', department: '' });
+    } catch (createError) {
+      setError(createError.message);
+    }
+  }
+
+  async function copyTemporaryPassword() {
+    try {
+      await navigator.clipboard.writeText(createdAccount.temporaryPassword);
+      setCopied(true);
+    } catch {
+      setError('Clipboard access is unavailable. Select and copy the temporary password instead.');
+    }
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="ADMINISTRATION" title="IT Staff" description="Create staff accounts and manage team access." />
+      {error && <div className="error">{error}</div>}
+      <div className="two-col">
+        <section className="panel">
+          <div className="panel-head"><div><h2>Staff accounts</h2><p>{staff.length} IT staff account{staff.length === 1 ? '' : 's'}</p></div></div>
+          {staff.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Email</th><th>Employee ID</th><th>Department</th><th>Access</th></tr></thead>
+                <tbody>{staff.map((member) => (
+                  <tr key={member.user_id}>
+                    <td><strong>{member.full_name}</strong></td>
+                    <td>{member.email}</td>
+                    <td>{member.employee_id || '—'}</td>
+                    <td>{member.department || '—'}</td>
+                    <td><span className="badge">{member.must_change_password ? 'Setup required' : 'Active'}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : <div className="empty"><h3>No staff accounts yet</h3></div>}
+        </section>
+
+        <section className="panel">
+          <div className="panel-head"><div><h2>Add IT staff</h2><p>A temporary password will be generated automatically.</p></div></div>
+          <form className="form-grid" onSubmit={createStaff}>
+            <label>Full name<input value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} required /></label>
+            <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></label>
+            <label>Employee ID<input value={form.employee_id} onChange={(event) => setForm({ ...form, employee_id: event.target.value })} /></label>
+            <label>Department<input value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} /></label>
+            <div className="form-actions"><button className="button primary" type="submit">Create staff account</button></div>
+          </form>
+        </section>
+      </div>
+
+      {createdAccount && <section className="panel">
+        <div className="panel-head"><div><h2>Temporary credentials</h2><p>Share these with {createdAccount.full_name}. The temporary password is shown only this time.</p></div></div>
+        <p><strong>Email:</strong> {createdAccount.email}</p>
+        <p><strong>Temporary password:</strong> <code>{createdAccount.temporaryPassword}</code></p>
+        <button type="button" className="button secondary" onClick={copyTemporaryPassword}>{copied ? 'Copied' : 'Copy temporary password'}</button>
+      </section>}
+    </>
+  );
+}
+
+function ChangePasswordPage() {
+  const navigate = useNavigate();
+  const { user, setUser } = useAuth();
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [error, setError] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+
+    try {
+      const data = await apiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify(form)
+      });
+      setUser(data.user);
+      navigate(getDashboardPath(normalizeRole(data.user.role)), { replace: true });
+    } catch (changeError) {
+      setError(changeError.message);
+    }
+  }
+
+  async function logout() {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    setUser(null);
+    navigate('/login', { replace: true });
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-art"><Logo /><div className="art-copy"><div className="eyebrow">ACCOUNT SECURITY</div><h1>One quick step.<br /><em>Then you’re ready.</em></h1><p>Choose a personal password before accessing the CampusHelp workspace.</p></div></div>
+      <div className="login-panel">
+        <div className="login-form">
+          <div className="mobile-logo"><Logo /></div>
+          <div className="eyebrow">PASSWORD SETUP</div>
+          <h1>Choose your password</h1>
+          <p>Signed in as {user?.email}. Your temporary password cannot be used to access the system.</p>
+          <form onSubmit={submit}>
+            <label>Temporary password<input type="password" autoComplete="current-password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} required /></label>
+            <label>New password<input type="password" autoComplete="new-password" minLength={12} value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} required /></label>
+            <label>Confirm new password<input type="password" autoComplete="new-password" minLength={12} value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} required /></label>
+            {error && <div className="error">{error}</div>}
+            <button type="submit" className="button primary login-button">Save new password</button>
+          </form>
+          <div className="login-options"><button type="button" onClick={logout}>Log out</button><span>At least 12 characters</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login() {
   const navigate = useNavigate();
   const { setUser } = useAuth();
@@ -816,7 +964,7 @@ function Login() {
       });
 
       setUser(data.user);
-      navigate(getDashboardPath(normalizeRole(data.user.role)));
+      navigate(data.user.must_change_password ? '/change-password' : getDashboardPath(normalizeRole(data.user.role)));
     } catch (err) {
       setError(err.message);
     }
@@ -1012,6 +1160,14 @@ function AppShellRoutes() {
     return <Navigate to="/login" replace />;
   }
 
+  if (user?.must_change_password && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />;
+  }
+
+  if (user && !user.must_change_password && location.pathname === '/change-password') {
+    return <Navigate to={getDashboardPath(normalizeRole(user.role))} replace />;
+  }
+
   if (user && (location.pathname === '/login' || location.pathname === '/register')) {
     return <Navigate to={getDashboardPath(normalizeRole(user.role))} replace />;
   }
@@ -1021,6 +1177,7 @@ function AppShellRoutes() {
       <Route path="/" element={<Navigate to={user ? getDashboardPath(normalizeRole(user.role)) : '/login'} replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/change-password" element={<ChangePasswordPage />} />
 
       <Route path="/user/dashboard" element={<Protected allowedRoles={['User']}><Shell role="User"><Dashboard role="User" /></Shell></Protected>} />
       <Route path="/user/tickets" element={<Protected allowedRoles={['User']}><Shell role="User"><TicketList role="User" /></Shell></Protected>} />
@@ -1036,6 +1193,7 @@ function AppShellRoutes() {
       <Route path="/staff/profile" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><ProfilePage /></Shell></Protected>} />
 
       <Route path="/admin/dashboard" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><Dashboard role="Administrator" /></Shell></Protected>} />
+      <Route path="/admin/staff" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><AdminStaffPage /></Shell></Protected>} />
       <Route path="/admin/tickets" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketList role="Administrator" /></Shell></Protected>} />
       <Route path="/admin/tickets/:ticketId" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketDetailPage /></Shell></Protected>} />
       <Route path="/admin/analytics" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><AdminAnalyticsPage /></Shell></Protected>} />

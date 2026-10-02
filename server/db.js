@@ -38,6 +38,7 @@ export async function ensureSchema() {
       full_name VARCHAR(100) NOT NULL,
       email VARCHAR(150) NOT NULL UNIQUE,
       password_hash VARCHAR(255) NOT NULL,
+      must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
       role VARCHAR(30) NOT NULL CHECK (role IN ('User', 'IT Staff', 'Administrator')),
       account_type VARCHAR(30) NOT NULL CHECK (account_type IN ('Student', 'Faculty', 'IT Staff', 'Administrator')),
       student_number VARCHAR(30),
@@ -47,6 +48,11 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE
   `);
 
   await pool.query(`
@@ -151,6 +157,7 @@ export function sanitizeUser(user) {
     email: user.email,
     role: user.role,
     account_type: user.account_type,
+    must_change_password: Boolean(user.must_change_password),
     student_number: user.student_number,
     employee_id: user.employee_id,
     department: user.department,
