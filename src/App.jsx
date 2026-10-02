@@ -1,10 +1,21 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 
-const STATUS_OPTIONS = ['Open', 'In Progress', 'Resolved', 'Closed'];
-const PRIORITY_OPTIONS = ['Low', 'Medium', 'High', 'Urgent'];
-const CATEGORIES = [
-  'Account and Access',
+const KEY = 'campushelp-data-v1';
+const users = [
+  { username: 'user', password: 'user123', role: 'user', name: 'Miguel Mendoza', email: 'miguel.mendoza@university.edu', department: 'Computer Science', id: '2024-00123' },
+  { username: 'itstaff', password: 'staff123', role: 'staff', name: 'Jordan Lee', email: 'jordan.lee@university.edu', department: 'Information Technology', id: 'IT-0042' },
+  { username: 'admin', password: 'admin123', role: 'admin', name: 'Dr. Alicia Reyes', email: 'alicia.reyes@university.edu', department: 'Information Technology', id: 'ADM-0001' }
+];
+
+const staff = [
+  { name: 'Jordan Lee', username: 'itstaff' },
+  { name: 'Priya Shah', username: 'staff2' },
+  { name: 'Marcus Chen', username: 'staff3' }
+];
+
+const categories = [
+  'Account & Access',
   'Password Reset',
   'Locked Account',
   'Computer/Laptop Issue',
@@ -12,69 +23,163 @@ const CATEGORIES = [
   'Email Issue',
   'Software/Application',
   'Printer/Peripheral',
-  'System/Portal Issue',
-  'Access Permission',
-  'Other'
+  'System/Portal Issue'
 ];
 
-const ROLE_ROUTES = {
-  User: '/user/dashboard',
-  'IT Staff': '/staff/dashboard',
-  Administrator: '/admin/dashboard'
-};
+const statuses = ['Open', 'Assigned', 'In Progress', 'Pending User', 'Resolved', 'Closed'];
+const priorities = ['Low', 'Normal', 'High', 'Urgent'];
 
-const AuthContext = React.createContext(null);
+const seedTickets = [
+  { id: 'IT-2026-001', subject: 'Locked Account', category: 'Locked Account', description: 'I cannot access my university account.', priority: 'Normal', status: 'Open', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-18T09:00:00.000Z' },
+  { id: 'IT-2026-002', subject: 'No Internet Connection', category: 'Network/Internet', description: 'The wireless connection in the library is unavailable.', priority: 'High', status: 'In Progress', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-19T11:30:00.000Z' },
+  { id: 'IT-2026-003', subject: 'Forgotten Password', category: 'Password Reset', description: 'Please help me reset my portal password.', priority: 'Normal', status: 'Resolved', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-15T14:20:00.000Z' },
+  { id: 'IT-2026-004', subject: 'Printer Not Working', category: 'Printer/Peripheral', description: 'The printer in Room 204 is displaying an error.', priority: 'Low', status: 'Pending User', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-22T08:10:00.000Z' },
+  { id: 'IT-2026-005', subject: 'University Portal Error', category: 'System/Portal Issue', description: 'The enrollment portal shows an unexpected error.', priority: 'High', status: 'Resolved', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-14T13:40:00.000Z' }
+];
 
-function normalizeRole(role) {
-  return role || 'User';
-}
+const seedNotifications = [
+  { id: 1, role: 'staff', text: 'New ticket IT-2026-001 has been submitted.', read: false },
+  { id: 2, role: 'user', text: 'Welcome to CampusHelp. Your tickets will appear here.', read: true },
+  { id: 3, role: 'admin', text: 'IT staff review summary is ready.', read: false }
+];
 
-function getDashboardPath(role) {
-  return ROLE_ROUTES[normalizeRole(role)] || '/login';
-}
-
-async function apiFetch(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const hasBody = options.body !== undefined && !(options.body instanceof FormData);
-
-  if (hasBody) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const response = await fetch(path, {
-    credentials: 'include',
-    ...options,
-    headers
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.message || 'Request failed');
-  }
-
-  return data;
-}
-
-function useAuth() {
-  return useContext(AuthContext);
-}
-
-function formatDate(value) {
-  if (!value) return '—';
+function initialData() {
   try {
-    return new Date(value).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  } catch (error) {
-    return '—';
-  }
+    const saved = JSON.parse(localStorage.getItem(KEY));
+    if (saved?.tickets) return saved;
+  } catch {}
+  return { tickets: seedTickets, notifications: seedNotifications, next: 6 };
+}
+
+function persist(data) {
+  localStorage.setItem(KEY, JSON.stringify(data));
+}
+
+function getSession() {
+  return JSON.parse(localStorage.getItem('campushelp-session') || 'null');
+}
+
+function setSession(session) {
+  localStorage.setItem('campushelp-session', JSON.stringify(session));
+}
+
+function fmt(value) {
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function time(value) {
+  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 function Icon({ children }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
+}
+
+function Logo() {
+  return (
+    <Link className="brand" to="/">
+      <span className="logo"><Icon>⌁</Icon></span>
+      <span>
+        <b>CampusHelp</b>
+        <small>Department of Information Technology</small>
+      </span>
+    </Link>
+  );
+}
+
+function Status({ value }) {
+  return <span className={'badge status-' + value.toLowerCase().replaceAll(' ', '-')}>{value}</span>;
+}
+
+function Priority({ value }) {
+  return <span className={'priority priority-' + value.toLowerCase()}><i /> {value}</span>;
+}
+
+function Protected({ role, children }) {
+  const session = getSession();
+
+  if (!session) return <Navigate to="/login" replace />;
+  if (role && session.role !== role) return <Navigate to={session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard'} replace />;
+
+  return children;
+}
+
+function useData() {
+  const [data, setData] = useState(initialData);
+
+  const update = (fn) => {
+    setData((old) => {
+      const next = fn({ ...old, tickets: old.tickets.map((ticket) => ({ ...ticket })), notifications: [...old.notifications] });
+      persist(next);
+      return next;
+    });
+  };
+
+  return [data, update];
+}
+
+function Shell({ role, children }) {
+  const navigate = useNavigate();
+  const [data] = useData();
+  const [open, setOpen] = useState(false);
+  const session = getSession();
+
+  const links = {
+    user: [
+      ['Dashboard', '/user/dashboard', '⌂'],
+      ['My Tickets', '/user/tickets', '▣'],
+      ['Create Ticket', '/user/create-ticket', '＋'],
+      ['Notifications', '/user/notifications', '◌'],
+      ['Profile', '/user/profile', '◍']
+    ],
+    staff: [
+      ['Dashboard', '/staff/dashboard', '⌂'],
+      ['Tickets', '/staff/tickets', '▣'],
+      ['Notifications', '/staff/notifications', '◌'],
+      ['Profile', '/staff/profile', '◍']
+    ],
+    admin: [
+      ['Dashboard', '/admin/dashboard', '⌂'],
+      ['Tickets', '/admin/tickets', '▣'],
+      ['Overview', '/admin/overview', '◫'],
+      ['Notifications', '/admin/notifications', '◌'],
+      ['Profile', '/admin/profile', '◍']
+    ]
+  };
+
+  function logout() {
+    localStorage.removeItem('campushelp-session');
+    navigate('/login');
+  }
+
+  const unread = data.notifications.filter((n) => (n.role === role || n.role === session?.role) && !n.read).length;
+
+  return (
+    <div className="app-shell">
+      <aside className={open ? 'sidebar open' : 'sidebar'}>
+        <Logo />
+        <div className="side-label">WORKSPACE</div>
+        <nav>
+          {links[role].map(([label, to, icon]) => (
+            <Link key={to} className="nav-link" to={to} onClick={() => setOpen(false)}>
+              <span className="nav-icon">{icon}</span>
+              {label}
+              {label === 'Notifications' && unread ? <span className="dot">{unread}</span> : null}
+            </Link>
+          ))}
+        </nav>
+        <button type="button" className="button secondary full" onClick={logout}>Logout</button>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <button type="button" className="menu-toggle" onClick={() => setOpen(!open)}>☰</button>
+          <div className="topbar-title">CampusHelp</div>
+        </header>
+        <div className="content-wrap">{children}</div>
+      </main>
+    </div>
+  );
 }
 
 function PageHead({ eyebrow, title, description, action }) {
@@ -90,122 +195,30 @@ function PageHead({ eyebrow, title, description, action }) {
   );
 }
 
-function StatusBadge({ value }) {
-  const text = String(value || 'Open');
-  const className = `badge status-${text.toLowerCase().replace(/\s+/g, '-')}`;
-  return <span className={className}>{text}</span>;
-}
-
-function PriorityBadge({ value }) {
-  const text = String(value || 'Medium');
-  const className = `priority priority-${text.toLowerCase()}`;
-  return <span className={className}><i /> {text}</span>;
-}
-
-function Logo() {
+function Cards({ items }) {
   return (
-    <Link className="brand" to="/">
-      <span className="logo"><Icon>⌁</Icon></span>
-      <span>
-        <b>CampusHelp</b>
-        <small>Department of Information Technology</small>
-      </span>
-    </Link>
-  );
-}
-
-function Protected({ allowedRoles, children }) {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <div className="page-shell"><div className="empty"><h3>Loading CampusHelp...</h3></div></div>;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (allowedRoles && !allowedRoles.includes(normalizeRole(user.role))) {
-    return <Navigate to={getDashboardPath(user.role)} replace />;
-  }
-
-  return children;
-}
-
-function Shell({ role, children }) {
-  const navigate = useNavigate();
-  const { setUser } = useAuth();
-  const [open, setOpen] = useState(false);
-
-  const links = {
-    User: [
-      ['Dashboard', '/user/dashboard', '⌂'],
-      ['My Tickets', '/user/tickets', '▣'],
-      ['Create Ticket', '/user/create-ticket', '＋'],
-      ['Notifications', '/user/notifications', '◌'],
-      ['Profile', '/user/profile', '◍']
-    ],
-    'IT Staff': [
-      ['Dashboard', '/staff/dashboard', '⌂'],
-      ['Tickets', '/staff/tickets', '▣'],
-      ['Notifications', '/staff/notifications', '◌'],
-      ['Profile', '/staff/profile', '◍']
-    ],
-    Administrator: [
-      ['Dashboard', '/admin/dashboard', '⌂'],
-      ['Tickets', '/admin/tickets', '▣'],
-      ['Analytics', '/admin/analytics', '◫'],
-      ['Notifications', '/admin/notifications', '◌'],
-      ['Profile', '/admin/profile', '◍']
-    ]
-  };
-
-  async function handleLogout() {
-    try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
-    } catch (error) {
-      // ignore, UI logout still should proceed
-    }
-
-    setUser(null);
-    navigate('/login');
-  }
-
-  return (
-    <div className="app-shell">
-      <aside className={open ? 'sidebar open' : 'sidebar'}>
-        <Logo />
-        <div className="side-label">WORKSPACE</div>
-        <nav>
-          {links[role].map(([label, to, icon]) => (
-            <Link key={to} className="nav-link" to={to} onClick={() => setOpen(false)}>
-              <span className="nav-icon">{icon}</span>
-              {label}
-            </Link>
-          ))}
-        </nav>
-        <button type="button" className="button secondary full" onClick={handleLogout}>Logout</button>
-      </aside>
-
-      <main className="main-panel">
-        <header className="topbar">
-          <button type="button" className="menu-toggle" onClick={() => setOpen(!open)}>☰</button>
-          <div className="topbar-title">CampusHelp</div>
-        </header>
-        <div className="content-wrap">{children}</div>
-      </main>
+    <div className="stat-grid">
+      {items.map((item) => (
+        <div className="stat-card" key={item.label}>
+          <div className={'stat-icon ' + (item.tone || '')}><Icon>{item.icon}</Icon></div>
+          <div>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function TicketTable({ tickets, linkPrefix, emptyText = 'No tickets found.' }) {
+function TicketTable({ tickets, linkPrefix, empty = 'No tickets found.' }) {
   const navigate = useNavigate();
 
-  if (!tickets || !tickets.length) {
+  if (!tickets.length) {
     return (
       <div className="empty">
         <div>⌁</div>
-        <h3>{emptyText}</h3>
+        <h3>{empty}</h3>
       </div>
     );
   }
@@ -224,204 +237,154 @@ function TicketTable({ tickets, linkPrefix, emptyText = 'No tickets found.' }) {
           </tr>
         </thead>
         <tbody>
-          {tickets.map((ticket) => {
-            const id = ticket.ticket_id || ticket.id;
-            return (
-              <tr key={id} onClick={() => navigate(`${linkPrefix}/${id}`)} style={{ cursor: 'pointer' }}>
-                <td>{id}</td>
-                <td>{ticket.subject}</td>
-                <td>{ticket.category}</td>
-                <td><StatusBadge value={ticket.status || 'Open'} /></td>
-                <td><PriorityBadge value={ticket.priority || 'Medium'} /></td>
-                <td>{formatDate(ticket.created_at)}</td>
-              </tr>
-            );
-          })}
+          {tickets.map((ticket) => (
+            <tr key={ticket.id} onClick={() => navigate(`${linkPrefix}/${ticket.id}`)} style={{ cursor: 'pointer' }}>
+              <td>{ticket.id}</td>
+              <td>{ticket.subject}</td>
+              <td>{ticket.category}</td>
+              <td><Status value={ticket.status} /></td>
+              <td><Priority value={ticket.priority} /></td>
+              <td>{fmt(ticket.createdAt)}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
   );
 }
 
-function suggestTicket(subject = '', description = '') {
-  const text = `${subject} ${description}`.toLowerCase();
-
-  let category = 'Other';
-  if (/(password|login|access|credential|reset)/.test(text)) category = 'Password Reset';
-  if (/(lock|locked|account)/.test(text)) category = 'Locked Account';
-  if (/(vpn|network|internet|wifi|connection|latency|offline)/.test(text)) category = 'Network/Internet';
-  if (/(email|mail|outlook)/.test(text)) category = 'Email Issue';
-  if (/(printer|scanner|peripheral)/.test(text)) category = 'Printer/Peripheral';
-  if (/(portal|system|website|site|portal error)/.test(text)) category = 'System/Portal Issue';
-  if (/(software|application|app|office|zoom)/.test(text)) category = 'Software/Application';
-  if (/(computer|laptop|device|hardware|desktop|battery)/.test(text)) category = 'Computer/Laptop Issue';
-  if (/(permission|access.*role|role.*access)/.test(text)) category = 'Access Permission';
-  if (/(account.*access|unable.*login)/.test(text)) category = 'Account and Access';
-
-  let priority = 'Medium';
-  if (/(critical|urgent|major outage|cannot.*login|campus.*down|network.*down)/.test(text)) {
-    priority = 'Urgent';
-  } else if (/(password|login|locked|portal|network|email|printer|system)/.test(text)) {
-    priority = 'High';
-  } else if (/(info|question|minor|check|update)/.test(text)) {
-    priority = 'Low';
-  }
-
-  return { suggestedCategory: category, suggestedPriority: priority };
+function FilterBar({ setSearch, setStatus, setCategory, setPriority, staffFilter = false }) {
+  return (
+    <div className="filters">
+      <label className="search">⌕
+        <input placeholder="Search tickets..." onChange={(e) => setSearch(e.target.value)} />
+      </label>
+      <select defaultValue="" onChange={(e) => setStatus(e.target.value)}>
+        <option value="">All statuses</option>
+        {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+      </select>
+      <select defaultValue="" onChange={(e) => setCategory(e.target.value)}>
+        <option value="">All categories</option>
+        {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+      </select>
+      {!staffFilter && (
+        <select defaultValue="" onChange={(e) => setPriority(e.target.value)}>
+          <option value="">All priorities</option>
+          {priorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+        </select>
+      )}
+    </div>
+  );
 }
 
 function Dashboard({ role }) {
-  const { user } = useAuth();
-  const [tickets, setTickets] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const session = getSession();
+  const [data] = useData();
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [ticketsData, notificationsData] = await Promise.all([
-          apiFetch('/api/tickets'),
-          apiFetch('/api/notifications')
-        ]);
-
-        setTickets(ticketsData.tickets || []);
-        setNotifications(notificationsData.notifications || []);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadData();
-  }, [role]);
-
-  if (loading) {
-    return <div className="empty"><h3>Loading dashboard...</h3></div>;
-  }
+  const mine = role === 'user'
+    ? data.tickets.filter((ticket) => ticket.requesterId === session.username)
+    : data.tickets.filter((ticket) => ticket.assignedTo === session.username || ticket.assignedTo === 'itstaff');
 
   const cards = [
-    { label: 'Total Tickets', value: tickets.length, tone: 'blue' },
-    { label: 'Open', value: tickets.filter((t) => t.status === 'Open').length, tone: 'green' },
-    { label: 'In Progress', value: tickets.filter((t) => t.status === 'In Progress').length, tone: 'amber' },
-    { label: 'Resolved', value: tickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length, tone: 'cyan' }
+    { label: 'Total Tickets', value: data.tickets.length, tone: 'blue', icon: '▣' },
+    { label: 'Open', value: data.tickets.filter((ticket) => ticket.status === 'Open').length, tone: 'green', icon: '⌂' },
+    { label: 'In Progress', value: data.tickets.filter((ticket) => ticket.status === 'In Progress').length, tone: 'amber', icon: '◌' },
+    { label: 'Resolved', value: data.tickets.filter((ticket) => ['Resolved', 'Closed'].includes(ticket.status)).length, tone: 'cyan', icon: '✓' }
   ];
-
-  const basePath = role === 'User' ? '/user/tickets' : role === 'IT Staff' ? '/staff/tickets' : '/admin/tickets';
 
   return (
     <>
-      <PageHead eyebrow="Overview" title={role === 'User' ? 'My Dashboard' : role === 'IT Staff' ? 'IT Staff Dashboard' : 'Admin Dashboard'} description={`Welcome, ${user?.full_name || 'User'}.`} />
-
-      <div className="stat-grid">
-        {cards.map((card) => (
-          <div className="stat-card" key={card.label}>
-            <div className={`stat-icon ${card.tone}`}><Icon>{card.label[0]}</Icon></div>
-            <div>
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-            </div>
-          </div>
-        ))}
-      </div>
+      <PageHead eyebrow="Overview" title={role === 'user' ? 'My Dashboard' : role === 'staff' ? 'IT Staff Dashboard' : 'Admin Dashboard'} description={`Welcome, ${session?.name || 'User'}.`} />
+      <Cards items={cards} />
 
       <div className="two-col">
         <section className="panel-card">
           <div className="panel-head"><h3>Recent Tickets</h3></div>
-          <TicketTable tickets={tickets.slice(0, 5)} linkPrefix={basePath} emptyText="No tickets yet." />
+          <TicketTable tickets={mine.slice(0, 5)} linkPrefix={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'} empty="No tickets yet." />
         </section>
 
         <section className="panel-card">
           <div className="panel-head"><h3>Notifications</h3></div>
-          {notifications.length ? (
-            <ul className="notification-list">
-              {notifications.slice(0, 5).map((item) => (
-                <li key={item.notification_id}><span>{item.message}</span></li>
-              ))}
-            </ul>
-          ) : (
-            <div className="empty"><h3>No notifications.</h3></div>
-          )}
+          <ul className="notification-list">
+            {data.notifications.filter((notification) => notification.role === role || notification.role === 'staff' || notification.role === 'admin').slice(0, 5).map((item) => (
+              <li key={item.id}><span>{item.text}</span></li>
+            ))}
+          </ul>
         </section>
       </div>
     </>
   );
 }
 
-function TicketList({ role }) {
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
+function TicketList({ role, assigned = false }) {
+  const [data, update] = useData();
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [category, setCategory] = useState('');
+  const [priority, setPriority] = useState('');
 
-  useEffect(() => {
-    async function loadTickets() {
-      try {
-        const data = await apiFetch('/api/tickets');
-        setTickets(data.tickets || []);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
+  const session = getSession();
+
+  const list = data.tickets.filter((ticket) => {
+    if (role === 'user') {
+      if (ticket.requesterId !== session.username) return false;
     }
-
-    loadTickets();
-  }, [role]);
-
-  if (loading) {
-    return <div className="empty"><h3>Loading tickets...</h3></div>;
-  }
-
-  const basePath = role === 'User' ? '/user/tickets' : role === 'IT Staff' ? '/staff/tickets' : '/admin/tickets';
+    if (role === 'staff' && assigned && ticket.assignedTo !== session.username) return false;
+    if (search && !`${ticket.subject} ${ticket.description} ${ticket.id}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (status && ticket.status !== status) return false;
+    if (category && ticket.category !== category) return false;
+    if (priority && ticket.priority !== priority) return false;
+    return true;
+  });
 
   return (
     <>
-      <PageHead eyebrow="TICKETS" title="Ticket List" description="Review and monitor submitted requests." action={<Link className="button" to={role === 'User' ? '/user/create-ticket' : '#'}>New Ticket</Link>} />
-      <TicketTable tickets={tickets} linkPrefix={basePath} emptyText="No tickets found." />
+      <PageHead eyebrow="TICKETS" title="Ticket List" description="Review and monitor submitted requests." action={role === 'user' ? <Link className="button" to="/user/create-ticket">New Ticket</Link> : null} />
+      <FilterBar setSearch={setSearch} setStatus={setStatus} setCategory={setCategory} setPriority={setPriority} staffFilter={role !== 'user'} />
+      <TicketTable tickets={list} linkPrefix={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'} empty="No tickets found." />
     </>
   );
 }
 
 function CreateTicket() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({
-    subject: '',
-    description: '',
-    category: 'Network/Internet',
-    priority: 'Medium'
-  });
+  const [data, update] = useData();
+  const [form, setForm] = useState({ subject: '', category: 'Account & Access', description: '', priority: 'Normal' });
   const [error, setError] = useState('');
 
-  const suggestion = useMemo(() => suggestTicket(form.subject, form.description), [form.subject, form.description]);
+  const session = getSession();
 
-  async function submit(e) {
+  function submit(e) {
     e.preventDefault();
-    setError('');
-
-    if (form.priority === 'Urgent' && suggestion.suggestedPriority !== 'Urgent') {
-      const confirmed = window.confirm(
-        'Confirm Urgent Priority\n\nUrgent priority should only be used for issues that significantly prevent academic or university operations or affect critical services. Incorrectly marking a non-urgent concern as urgent may delay the handling of genuinely critical requests.'
-      );
-
-      if (!confirmed) {
-        return;
-      }
+    if (!form.subject.trim() || !form.description.trim()) {
+      setError('Subject and description are required.');
+      return;
     }
 
-    try {
-      await apiFetch('/api/tickets', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...form,
-          suggested_category: suggestion.suggestedCategory,
-          suggested_priority: suggestion.suggestedPriority,
-          priority_manually_escalated: form.priority === 'Urgent' && suggestion.suggestedPriority !== 'Urgent'
-        })
-      });
+    const ticket = {
+      id: `IT-${new Date().getFullYear()}-${String(data.next).padStart(3, '0')}`,
+      subject: form.subject.trim(),
+      category: form.category,
+      description: form.description.trim(),
+      priority: form.priority,
+      status: 'Open',
+      requesterId: session.username,
+      requesterName: session.name,
+      assignedTo: 'itstaff',
+      createdAt: new Date().toISOString()
+    };
 
-      navigate('/user/dashboard');
-    } catch (err) {
-      setError(err.message);
-    }
+    update((old) => ({
+      ...old,
+      tickets: [ticket, ...old.tickets],
+      notifications: [
+        { id: Date.now(), role: 'staff', text: `New ticket ${ticket.id} has been submitted.`, read: false },
+        ...old.notifications
+      ],
+      next: old.next + 1
+    }));
+
+    navigate('/user/tickets');
   }
 
   return (
@@ -439,9 +402,7 @@ function CreateTicket() {
           <label>
             <span>Category</span>
             <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-              {CATEGORIES.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
+              {categories.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
         </div>
@@ -455,15 +416,12 @@ function CreateTicket() {
           <label>
             <span>Priority</span>
             <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-              {PRIORITY_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
+              {priorities.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
           </label>
-
           <div className="suggestion-box">
-            <div><strong>Suggested Category:</strong> {suggestion.suggestedCategory}</div>
-            <div><strong>Suggested Priority:</strong> {suggestion.suggestedPriority}</div>
+            <div><strong>Suggested Category:</strong> {form.category}</div>
+            <div><strong>Suggested Priority:</strong> {form.priority}</div>
           </div>
         </div>
 
@@ -475,88 +433,63 @@ function CreateTicket() {
   );
 }
 
-function TicketDetailPage() {
+function TicketDetail({ role }) {
   const { ticketId } = useParams();
-  const { user } = useAuth();
-  const [ticket, setTicket] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [data, update] = useData();
   const [reply, setReply] = useState('');
-  const [status, setStatus] = useState('Open');
   const [error, setError] = useState('');
+  const session = getSession();
 
-  async function loadTicket() {
-    try {
-      const data = await apiFetch(`/api/tickets/${ticketId}`);
-      setTicket(data.ticket);
-      setMessages(data.messages || []);
-      setStatus(data.ticket.status || 'Open');
-    } catch (err) {
-      setError(err.message);
-    }
+  const ticket = data.tickets.find((item) => item.id === ticketId);
+  if (!ticket) {
+    return <div className="empty"><div>⌁</div><h3>Ticket not found.</h3></div>;
   }
 
-  useEffect(() => {
-    loadTicket();
-  }, [ticketId]);
-
-  async function handleStatusChange(nextStatus) {
-    try {
-      await apiFetch(`/api/tickets/${ticketId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: nextStatus })
-      });
-      setStatus(nextStatus);
-      await loadTicket();
-    } catch (err) {
-      setError(err.message);
-    }
+  function updateStatus(nextStatus) {
+    update((old) => ({
+      ...old,
+      tickets: old.tickets.map((item) => item.id === ticketId ? { ...item, status: nextStatus } : item)
+    }));
   }
 
-  async function sendReply() {
+  function sendReply() {
     if (!reply.trim()) return;
 
-    try {
-      await apiFetch(`/api/tickets/${ticketId}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ message: reply })
-      });
-      setReply('');
-      await loadTicket();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+    update((old) => ({
+      ...old,
+      tickets: old.tickets.map((item) => item.id === ticketId ? { ...item, status: 'In Progress' } : item),
+      notifications: [
+        { id: Date.now(), role: role === 'user' ? 'staff' : 'user', text: `${session.name} replied on ${ticketId}.`, read: false },
+        ...old.notifications
+      ]
+    }));
 
-  if (!ticket) {
-    return <div className="empty"><h3>Loading ticket...</h3></div>;
+    setReply('');
   }
 
   return (
     <>
-      <PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">#{ticket.ticket_id}</span>} action={<Link className="button secondary" to={getDashboardPath(user.role)}>Back</Link>} />
+      <PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">#{ticket.id}</span>} action={<Link className="button secondary" to={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'}>Back</Link>} />
       {error && <div className="alert error">{error}</div>}
 
       <section className="panel-card">
         <div className="field-grid two-up">
           <div>
             <p><strong>Category:</strong> {ticket.category}</p>
-            <p><strong>Priority:</strong> <PriorityBadge value={ticket.priority} /></p>
-            <p><strong>Suggested Category:</strong> {ticket.suggested_category || 'Not provided'}</p>
-            <p><strong>Suggested Priority:</strong> {ticket.suggested_priority || 'Not provided'}</p>
+            <p><strong>Priority:</strong> <Priority value={ticket.priority} /></p>
+            <p><strong>Requester:</strong> {ticket.requesterName}</p>
+            <p><strong>Assigned:</strong> {ticket.assignedTo ? ticket.assignedTo : 'Unassigned'}</p>
           </div>
           <div>
-            {['IT Staff', 'Administrator'].includes(user.role) && (
+            {['staff', 'admin'].includes(role) && (
               <label>
                 <span>Status</span>
-                <select value={status} onChange={(e) => handleStatusChange(e.target.value)}>
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
+                <select value={ticket.status} onChange={(e) => updateStatus(e.target.value)}>
+                  {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </label>
             )}
-            <p><strong>Requester:</strong> {ticket.requester_name || 'Unknown'}</p>
-            <p><strong>Assigned:</strong> {ticket.assigned_staff_name || 'Unassigned'}</p>
+            <p><strong>Created:</strong> {time(ticket.createdAt)}</p>
           </div>
         </div>
 
@@ -568,21 +501,15 @@ function TicketDetailPage() {
 
       <section className="panel-card">
         <div className="panel-head"><h3>Conversation</h3></div>
-        {messages.length ? (
-          <div className="message-list">
-            {messages.map((item) => (
-              <div key={item.message_id} className="message-item">
-                <div className="message-meta">
-                  <strong>{item.sender_name}</strong>
-                  <span>{formatDate(item.sent_at)}</span>
-                </div>
-                <p>{item.message}</p>
-              </div>
-            ))}
+        <div className="message-list">
+          <div className="message-item">
+            <div className="message-meta">
+              <strong>{ticket.requesterName}</strong>
+              <span>{time(ticket.createdAt)}</span>
+            </div>
+            <p>{ticket.description}</p>
           </div>
-        ) : (
-          <div className="empty"><h3>No messages yet.</h3></div>
-        )}
+        </div>
 
         <div className="reply-box">
           <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows="4" placeholder="Write a response..." />
@@ -593,125 +520,83 @@ function TicketDetailPage() {
   );
 }
 
-function NotificationsPage() {
-  const [notes, setNotes] = useState([]);
+function NotificationsPage({ role }) {
+  const [data, update] = useData();
+  const session = getSession();
 
-  useEffect(() => {
-    async function loadNotifications() {
-      try {
-        const data = await apiFetch('/api/notifications');
-        setNotes(data.notifications || []);
-      } catch (error) {
-        console.error(error);
-      }
-    }
+  const notes = data.notifications.filter((notification) => notification.role === role || notification.role === session?.role);
 
-    loadNotifications();
-  }, []);
-
-  async function markRead(notificationId) {
-    try {
-      await apiFetch(`/api/notifications/${notificationId}/read`, { method: 'PATCH' });
-      setNotes((current) => current.map((item) => item.notification_id === notificationId ? { ...item, is_read: true } : item));
-    } catch (error) {
-      console.error(error);
-    }
+  function markRead(id) {
+    update((old) => ({
+      ...old,
+      notifications: old.notifications.map((note) => note.id === id ? { ...note, read: true } : note)
+    }));
   }
 
   return (
     <>
-      <PageHead eyebrow="INBOX" title="Notifications" description="Track updates sent by the CampusHelp system." />
+      <PageHead eyebrow="INBOX" title="Notifications" description="Stay up to date with the latest CampusHelp activity." />
       {notes.length ? (
         <div className="notification-stack">
           {notes.map((item) => (
-            <div key={item.notification_id} className={`notification-item ${item.is_read ? 'read' : 'unread'}`}>
+            <div key={item.id} className={'notification-item ' + (item.read ? 'read' : 'unread')}>
               <div>
-                <strong>{item.message}</strong>
-                <small>{formatDate(item.created_at)}</small>
+                <strong>{item.text}</strong>
+                <small>{fmt(new Date().toISOString())}</small>
               </div>
-              {!item.is_read && <button type="button" className="button secondary" onClick={() => markRead(item.notification_id)}>Mark Read</button>}
+              {!item.read && <button type="button" className="button secondary" onClick={() => markRead(item.id)}>Mark Read</button>}
             </div>
           ))}
         </div>
       ) : (
-        <div className="empty"><h3>No notifications yet.</h3></div>
+        <div className="empty"><div>⌁</div><h3>No notifications yet.</h3></div>
       )}
     </>
   );
 }
 
-function ProfilePage() {
-  const { user } = useAuth();
-
-  if (!user) {
-    return <div className="empty"><h3>No profile data.</h3></div>;
-  }
+function Profile({ role }) {
+  const session = getSession();
+  const user = users.find((entry) => entry.role === role);
 
   return (
     <>
-      <PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account details." />
+      <PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account information." />
       <section className="profile-card">
-        <div className="profile-row"><strong>Full Name:</strong> <span>{user.full_name}</span></div>
-        <div className="profile-row"><strong>Email:</strong> <span>{user.email}</span></div>
-        <div className="profile-row"><strong>Role:</strong> <span>{user.role}</span></div>
-        <div className="profile-row"><strong>Account Type:</strong> <span>{user.account_type}</span></div>
-        <div className="profile-row"><strong>Department:</strong> <span>{user.department || 'Not specified'}</span></div>
-        {user.account_type === 'Student' && user.student_number && (
-          <div className="profile-row"><strong>Student Number:</strong> <span>{user.student_number}</span></div>
-        )}
-        {user.account_type === 'Faculty' && user.employee_id && (
-          <div className="profile-row"><strong>Employee ID:</strong> <span>{user.employee_id}</span></div>
-        )}
+        <div className="profile-row"><strong>Full Name:</strong> <span>{session?.name || user?.name}</span></div>
+        <div className="profile-row"><strong>Email:</strong> <span>{session?.email || user?.email}</span></div>
+        <div className="profile-row"><strong>Role:</strong> <span>{role}</span></div>
+        <div className="profile-row"><strong>Department:</strong> <span>{session?.department || user?.department}</span></div>
+        <div className="profile-row"><strong>Employee ID:</strong> <span>{session?.id || user?.id}</span></div>
       </section>
     </>
   );
 }
 
-function AdminAnalyticsPage() {
-  const [analytics, setAnalytics] = useState(null);
+function AdminOverview() {
+  const [data] = useData();
 
-  useEffect(() => {
-    async function loadAnalytics() {
-      try {
-        const data = await apiFetch('/api/admin/analytics');
-        setAnalytics(data);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    loadAnalytics();
-  }, []);
-
-  if (!analytics) {
-    return <div className="empty"><h3>Loading analytics...</h3></div>;
-  }
+  const byCategory = categories.map((category) => [category, data.tickets.filter((ticket) => ticket.category === category).length]);
+  const max = Math.max(1, ...byCategory.map(([, count]) => count));
 
   return (
     <>
-      <PageHead eyebrow="ADMINISTRATION" title="Analytics" description="PostgreSQL-backed CampusHelp system overview." />
-      <div className="stat-grid">
-        <div className="stat-card"><div className="stat-icon blue"><Icon>◫</Icon></div><div><span>Total Tickets</span><strong>{analytics.totals.total}</strong></div></div>
-        <div className="stat-card"><div className="stat-icon green"><Icon>⌂</Icon></div><div><span>Open</span><strong>{analytics.totals.open}</strong></div></div>
-        <div className="stat-card"><div className="stat-icon amber"><Icon>◌</Icon></div><div><span>In Progress</span><strong>{analytics.totals.inProgress}</strong></div></div>
-        <div className="stat-card"><div className="stat-icon cyan"><Icon>✓</Icon></div><div><span>Resolved</span><strong>{analytics.totals.resolved}</strong></div></div>
-      </div>
-
+      <PageHead eyebrow="ADMINISTRATION" title="Overview" description="High-level visibility into CampusHelp ticket health." />
       <div className="two-col">
         <section className="panel-card">
           <div className="panel-head"><h3>Tickets by Category</h3></div>
           <ul className="bullet-list">
-            {(analytics.byCategory || []).map((item) => (
-              <li key={item.category}><span>{item.category}</span><strong>{item.count}</strong></li>
+            {byCategory.map(([category, count]) => (
+              <li key={category}><span>{category}</span><strong>{count}</strong></li>
             ))}
           </ul>
         </section>
 
         <section className="panel-card">
-          <div className="panel-head"><h3>Tickets by Status</h3></div>
+          <div className="panel-head"><h3>Ticket Status Breakdown</h3></div>
           <ul className="bullet-list">
-            {(analytics.byStatus || []).map((item) => (
-              <li key={item.status}><span>{item.status}</span><strong>{item.count}</strong></li>
+            {statuses.map((status) => (
+              <li key={status}><span>{status}</span><strong>{data.tickets.filter((ticket) => ticket.status === status).length}</strong></li>
             ))}
           </ul>
         </section>
@@ -722,25 +607,20 @@ function AdminAnalyticsPage() {
 
 function Login() {
   const navigate = useNavigate();
-  const { setUser } = useAuth();
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
 
-  async function submit(e) {
+  function submit(e) {
     e.preventDefault();
-    setError('');
-
-    try {
-      const data = await apiFetch('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(form)
-      });
-
-      setUser(data.user);
-      navigate(getDashboardPath(data.user.role));
-    } catch (err) {
-      setError(err.message);
+    const match = users.find((user) => user.username === form.username && user.password === form.password);
+    if (!match) {
+      setError('Invalid username or password.');
+      return;
     }
+
+    const session = { username: match.username, name: match.name, role: match.role, email: match.email, department: match.department, id: match.id };
+    setSession(session);
+    navigate(match.role === 'user' ? '/user/dashboard' : match.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard');
   }
 
   return (
@@ -764,8 +644,8 @@ function Login() {
           <form onSubmit={submit}>
             {error && <div className="alert error">{error}</div>}
             <label>
-              <span>Email</span>
-              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@mymail.mapua.edu.ph" required />
+              <span>Username</span>
+              <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="username" required />
             </label>
             <label>
               <span>Password</span>
@@ -773,224 +653,43 @@ function Login() {
             </label>
             <button type="submit" className="button full">Login</button>
             <div className="signup-row">
-              <Link to="/register">Create an account</Link>
+              <span>Demo accounts: user / staff / admin</span>
             </div>
           </form>
         </div>
       </div>
     </div>
-  );
-}
-
-function Register() {
-  const navigate = useNavigate();
-  const { setUser } = useAuth();
-  const [form, setForm] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    accountType: 'Student',
-    studentNumber: '',
-    employeeId: '',
-    department: '',
-    ecm: null
-  });
-  const [error, setError] = useState('');
-
-  async function submit(e) {
-    e.preventDefault();
-    setError('');
-
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    if (!form.email.endsWith('@mymail.mapua.edu.ph')) {
-      setError('Mapúa email is required. Use your @mymail.mapua.edu.ph address.');
-      return;
-    }
-
-    if (form.accountType === 'Student' && !form.ecm) {
-      setError('Student ECM upload is required.');
-      return;
-    }
-
-    try {
-      const data = new FormData();
-      data.append('full_name', form.full_name);
-      data.append('email', form.email);
-      data.append('password', form.password);
-      data.append('confirmPassword', form.confirmPassword);
-      data.append('account_type', form.accountType);
-      data.append('student_number', form.studentNumber);
-      data.append('employee_id', form.employeeId);
-      data.append('department', form.department);
-
-      if (form.ecm) {
-        data.append('ecm', form.ecm);
-      }
-
-      const result = await apiFetch('/api/auth/register', {
-        method: 'POST',
-        body: data
-      });
-
-      setUser(result.user);
-      navigate(getDashboardPath(result.user.role));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  return (
-    <div className="login-page">
-      <div className="login-panel single-column">
-        <div className="login-card wide-card">
-          <div className="eyebrow">CREATE ACCOUNT</div>
-          <h2>Sign Up</h2>
-          <form onSubmit={submit}>
-            {error && <div className="alert error">{error}</div>}
-
-            <div className="field-grid two-up">
-              <label>
-                <span>Full Name</span>
-                <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required />
-              </label>
-
-              <label>
-                <span>Account Type</span>
-                <select value={form.accountType} onChange={(e) => setForm({ ...form, accountType: e.target.value })}>
-                  <option value="Student">Student</option>
-                  <option value="Faculty">Faculty</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="field-grid two-up">
-              <label>
-                <span>Email</span>
-                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@mymail.mapua.edu.ph" required />
-              </label>
-
-              <label>
-                <span>Department</span>
-                <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="Department or unit" />
-              </label>
-            </div>
-
-            <div className="field-grid two-up">
-              <label>
-                <span>Password</span>
-                <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
-              </label>
-
-              <label>
-                <span>Confirm Password</span>
-                <input type="password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} required />
-              </label>
-            </div>
-
-            {form.accountType === 'Student' ? (
-              <>
-                <label>
-                  <span>Student Number</span>
-                  <input value={form.studentNumber} onChange={(e) => setForm({ ...form, studentNumber: e.target.value })} required />
-                </label>
-
-                <label>
-                  <span>ECM Upload (required)</span>
-                  <input type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => setForm({ ...form, ecm: e.target.files[0] })} required />
-                </label>
-              </>
-            ) : (
-              <label>
-                <span>Employee ID</span>
-                <input value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
-              </label>
-            )}
-
-            <div className="action-row">
-              <button type="submit" className="button">Create Account</button>
-            </div>
-            <div className="signup-row">
-              <Link to="/login">Back to login</Link>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AppRoutes() {
-  const location = useLocation();
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <div className="page-shell"><div className="empty"><h3>Loading CampusHelp...</h3></div></div>;
-  }
-
-  if (!user && location.pathname !== '/login' && location.pathname !== '/register') {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (user && (location.pathname === '/login' || location.pathname === '/register')) {
-    return <Navigate to={getDashboardPath(user.role)} replace />;
-  }
-
-  return (
-    <Routes>
-      <Route path="/" element={<Navigate to={user ? getDashboardPath(user.role) : '/login'} replace />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-
-      <Route path="/user/dashboard" element={<Protected allowedRoles={['User']}><Shell role="User"><Dashboard role="User" /></Shell></Protected>} />
-      <Route path="/user/tickets" element={<Protected allowedRoles={['User']}><Shell role="User"><TicketList role="User" /></Shell></Protected>} />
-      <Route path="/user/tickets/:ticketId" element={<Protected allowedRoles={['User']}><Shell role="User"><TicketDetailPage /></Shell></Protected>} />
-      <Route path="/user/create-ticket" element={<Protected allowedRoles={['User']}><Shell role="User"><CreateTicket /></Shell></Protected>} />
-      <Route path="/user/notifications" element={<Protected allowedRoles={['User']}><Shell role="User"><NotificationsPage /></Shell></Protected>} />
-      <Route path="/user/profile" element={<Protected allowedRoles={['User']}><Shell role="User"><ProfilePage /></Shell></Protected>} />
-
-      <Route path="/staff/dashboard" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><Dashboard role="IT Staff" /></Shell></Protected>} />
-      <Route path="/staff/tickets" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><TicketList role="IT Staff" /></Shell></Protected>} />
-      <Route path="/staff/tickets/:ticketId" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><TicketDetailPage /></Shell></Protected>} />
-      <Route path="/staff/notifications" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><NotificationsPage /></Shell></Protected>} />
-      <Route path="/staff/profile" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><ProfilePage /></Shell></Protected>} />
-
-      <Route path="/admin/dashboard" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><Dashboard role="Administrator" /></Shell></Protected>} />
-      <Route path="/admin/tickets" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketList role="Administrator" /></Shell></Protected>} />
-      <Route path="/admin/tickets/:ticketId" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketDetailPage /></Shell></Protected>} />
-      <Route path="/admin/analytics" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><AdminAnalyticsPage /></Shell></Protected>} />
-      <Route path="/admin/notifications" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><NotificationsPage /></Shell></Protected>} />
-      <Route path="/admin/profile" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><ProfilePage /></Shell></Protected>} />
-    </Routes>
   );
 }
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadSession() {
-      try {
-        const data = await apiFetch('/api/auth/me');
-        setUser(data.user || null);
-      } catch (error) {
-        setUser(null);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadSession();
-  }, []);
+  const location = useLocation();
+  const session = getSession();
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading }}>
-      <AppRoutes />
-    </AuthContext.Provider>
+    <Routes>
+      <Route path="/login" element={session ? <Navigate to={session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard'} replace /> : <Login />} />
+      <Route path="/" element={<Navigate to={session ? (session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard') : '/login'} replace />} />
+
+      <Route path="/user/dashboard" element={<Protected role="user"><Shell role="user"><Dashboard role="user" /></Shell></Protected>} />
+      <Route path="/user/tickets" element={<Protected role="user"><Shell role="user"><TicketList role="user" /></Shell></Protected>} />
+      <Route path="/user/tickets/:ticketId" element={<Protected role="user"><Shell role="user"><TicketDetail role="user" /></Shell></Protected>} />
+      <Route path="/user/create-ticket" element={<Protected role="user"><Shell role="user"><CreateTicket /></Shell></Protected>} />
+      <Route path="/user/notifications" element={<Protected role="user"><Shell role="user"><NotificationsPage role="user" /></Shell></Protected>} />
+      <Route path="/user/profile" element={<Protected role="user"><Shell role="user"><Profile role="user" /></Shell></Protected>} />
+
+      <Route path="/staff/dashboard" element={<Protected role="staff"><Shell role="staff"><Dashboard role="staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets" element={<Protected role="staff"><Shell role="staff"><TicketList role="staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets/:ticketId" element={<Protected role="staff"><Shell role="staff"><TicketDetail role="staff" /></Shell></Protected>} />
+      <Route path="/staff/notifications" element={<Protected role="staff"><Shell role="staff"><NotificationsPage role="staff" /></Shell></Protected>} />
+      <Route path="/staff/profile" element={<Protected role="staff"><Shell role="staff"><Profile role="staff" /></Shell></Protected>} />
+
+      <Route path="/admin/dashboard" element={<Protected role="admin"><Shell role="admin"><Dashboard role="admin" /></Shell></Protected>} />
+      <Route path="/admin/tickets" element={<Protected role="admin"><Shell role="admin"><TicketList role="admin" /></Shell></Protected>} />
+      <Route path="/admin/tickets/:ticketId" element={<Protected role="admin"><Shell role="admin"><TicketDetail role="admin" /></Shell></Protected>} />
+      <Route path="/admin/overview" element={<Protected role="admin"><Shell role="admin"><AdminOverview /></Shell></Protected>} />
+      <Route path="/admin/notifications" element={<Protected role="admin"><Shell role="admin"><NotificationsPage role="admin" /></Shell></Protected>} />
+      <Route path="/admin/profile" element={<Protected role="admin"><Shell role="admin"><Profile role="admin" /></Shell></Protected>} />
+    </Routes>
   );
 }
