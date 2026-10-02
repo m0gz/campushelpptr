@@ -75,6 +75,11 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE tickets
+    ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS ticket_messages (
       message_id BIGSERIAL PRIMARY KEY,
       ticket_id BIGINT NOT NULL REFERENCES tickets(ticket_id) ON DELETE CASCADE,
