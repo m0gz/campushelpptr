@@ -447,6 +447,10 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
     const category = String(req.body.category || ticket.category);
     const assignedStaffId = req.body.assigned_staff_id !== undefined ? Number(req.body.assigned_staff_id) : ticket.assigned_staff_id;
 
+    if (!['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid ticket status.' });
+    }
+
     const updateResult = await pool.query(
       `
         UPDATE tickets
@@ -473,11 +477,18 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
       await logAudit(req.user.user_id, ticketId, 'IT Staff response');
     }
 
+    const sideEffects = [logAudit(req.user.user_id, ticketId, 'Ticket update')];
     if (ticket.requester_id !== req.user.user_id) {
-      await createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`);
+      sideEffects.push(createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`));
     }
 
-    await logAudit(req.user.user_id, ticketId, 'Ticket update');
+    const sideEffectResults = await Promise.allSettled(sideEffects);
+    for (const result of sideEffectResults) {
+      if (result.status === 'rejected') {
+        console.error('Ticket update side effect failed:', result.reason);
+      }
+    }
+
     return res.json({ message: 'Ticket updated successfully.', ticket: updatedTicket });
   } catch (error) {
     console.error('Ticket patch error:', error);
