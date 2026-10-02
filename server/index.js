@@ -446,6 +446,7 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
     const priority = String(req.body.priority || ticket.priority);
     const category = String(req.body.category || ticket.category);
     const assignedStaffId = req.body.assigned_staff_id !== undefined ? Number(req.body.assigned_staff_id) : ticket.assigned_staff_id;
+    const resolvedAt = ['Resolved', 'Closed'].includes(status) ? new Date() : null;
 
     if (!['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) {
       return res.status(400).json({ message: 'Invalid ticket status.' });
@@ -459,11 +460,11 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
             category = $3,
             assigned_staff_id = $4,
             updated_at = NOW(),
-            resolved_at = CASE WHEN $1 = 'Resolved' OR $1 = 'Closed' THEN NOW() ELSE NULL END
-        WHERE ticket_id = $5
+            resolved_at = $5
+        WHERE ticket_id = $6
         RETURNING *
       `,
-      [status, priority, category, assignedStaffId, ticketId]
+      [status, priority, category, assignedStaffId, resolvedAt, ticketId]
     );
 
     const updatedTicket = updateResult.rows[0];
