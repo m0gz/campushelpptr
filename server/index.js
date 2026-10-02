@@ -23,9 +23,12 @@ import {
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 const port = Number(process.env.PORT || 3001);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '../uploads');
+const uploadDir = process.env.VERCEL
+  ? path.join('/tmp', 'campushelp-uploads')
+  : path.join(__dirname, '../uploads');
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -50,7 +53,7 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: false,
+      secure: process.env.NODE_ENV === 'production',
       maxAge: 1000 * 60 * 60 * 10
     }
   })
@@ -570,10 +573,26 @@ if (fs.existsSync(distDir)) {
   });
 }
 
+let databaseInitialization;
+
+export function initializeDatabase() {
+  if (!databaseInitialization) {
+    databaseInitialization = ensureSchema()
+      .then(seedDefaultAccounts)
+      .catch((error) => {
+        databaseInitialization = undefined;
+        throw error;
+      });
+  }
+
+  return databaseInitialization;
+}
+
+export { app };
+
 async function startServer() {
   try {
-    await ensureSchema();
-    await seedDefaultAccounts();
+    await initializeDatabase();
     app.listen(port, () => {
       console.log(`CampusHelp API running on http://localhost:${port}`);
     });
@@ -583,4 +602,6 @@ async function startServer() {
   }
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
