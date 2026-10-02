@@ -8,6 +8,7 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
+import { randomBytes } from 'node:crypto';
 
 import {
   pool,
@@ -96,6 +97,17 @@ async function requireAuth(req, res, next) {
     }
 
     req.user = result.rows[0];
+
+    if (
+      req.user.must_change_password
+      && !['/api/auth/logout', '/api/auth/change-password'].includes(req.path)
+    ) {
+      return res.status(403).json({
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Change your temporary password before using CampusHelp.'
+      });
+    }
+
     next();
   } catch (error) {
     console.error('Auth lookup failed:', error);
@@ -234,6 +246,44 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     return res.status(500).json({ message: 'Login failed. Please try again.' });
+  }
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || '');
+    const newPassword = String(req.body.newPassword || '');
+    const confirmPassword = String(req.body.confirmPassword || '');
+
+    if (newPassword.length < 12) {
+      return res.status(400).json({ message: 'Your new password must be at least 12 characters.' });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: 'The new passwords do not match.' });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ message: 'Choose a password different from your temporary password.' });
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, req.user.password_hash);
+    if (!passwordMatches) {
+      return res.status(400).json({ message: 'Your current password is incorrect.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    const result = await pool.query(
+      'UPDATE users SET password_hash = $1, must_change_password = FALSE, updated_at = NOW() WHERE user_id = $2 RETURNING *',
+      [passwordHash, req.user.user_id]
+    );
+
+    logAudit(req.user.user_id, null, 'Password changed').catch((error) => {
+      console.error('Password-change audit failed:', error);
+    });
+
+    return res.json({ user: sanitizeUser(result.rows[0]) });
+  } catch (error) {
+    console.error('Change password error:', error);
+    return res.status(500).json({ message: 'Unable to change password.' });
   }
 });
 
@@ -396,6 +446,11 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
     const priority = String(req.body.priority || ticket.priority);
     const category = String(req.body.category || ticket.category);
     const assignedStaffId = req.body.assigned_staff_id !== undefined ? Number(req.body.assigned_staff_id) : ticket.assigned_staff_id;
+    const resolvedAt = ['Resolved', 'Closed'].includes(status) ? new Date() : null;
+
+    if (!['Open', 'In Progress', 'Resolved', 'Closed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid ticket status.' });
+    }
 
     const updateResult = await pool.query(
       `
@@ -405,11 +460,11 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
             category = $3,
             assigned_staff_id = $4,
             updated_at = NOW(),
-            resolved_at = CASE WHEN $1 = 'Resolved' OR $1 = 'Closed' THEN NOW() ELSE NULL END
-        WHERE ticket_id = $5
+            resolved_at = $5
+        WHERE ticket_id = $6
         RETURNING *
       `,
-      [status, priority, category, assignedStaffId, ticketId]
+      [status, priority, category, assignedStaffId, resolvedAt, ticketId]
     );
 
     const updatedTicket = updateResult.rows[0];
@@ -423,15 +478,25 @@ app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
       await logAudit(req.user.user_id, ticketId, 'IT Staff response');
     }
 
+    const sideEffects = [logAudit(req.user.user_id, ticketId, 'Ticket update')];
     if (ticket.requester_id !== req.user.user_id) {
-      await createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`);
+      sideEffects.push(createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`));
     }
 
-    await logAudit(req.user.user_id, ticketId, 'Ticket update');
+    const sideEffectResults = await Promise.allSettled(sideEffects);
+    for (const result of sideEffectResults) {
+      if (result.status === 'rejected') {
+        console.error('Ticket update side effect failed:', result.reason);
+      }
+    }
+
     return res.json({ message: 'Ticket updated successfully.', ticket: updatedTicket });
   } catch (error) {
     console.error('Ticket patch error:', error);
-    return res.status(500).json({ message: 'The ticket could not be updated.' });
+    return res.status(500).json({
+      message: 'The ticket could not be updated.',
+      diagnosticCode: error.code || 'INTERNAL_ERROR'
+    });
   }
 });
 
@@ -516,6 +581,61 @@ app.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Mark notification read error:', error);
     return res.status(500).json({ message: 'Unable to update notification.' });
+  }
+});
+
+app.get('/api/admin/staff', requireAuth, async (req, res) => {
+  if (!allowRole(req, ['Administrator'])) {
+    return res.status(403).json({ message: 'Not authorized.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT user_id, full_name, email, employee_id, department, must_change_password, created_at
+       FROM users WHERE role = 'IT Staff' ORDER BY full_name`
+    );
+    return res.json({ staff: result.rows });
+  } catch (error) {
+    console.error('List IT staff error:', error);
+    return res.status(500).json({ message: 'Unable to load IT staff.' });
+  }
+});
+
+app.post('/api/admin/staff', requireAuth, async (req, res) => {
+  if (!allowRole(req, ['Administrator'])) {
+    return res.status(403).json({ message: 'Not authorized.' });
+  }
+
+  const fullName = String(req.body.full_name || '').trim();
+  const email = normalizeEmail(req.body.email || '');
+  const employeeId = String(req.body.employee_id || '').trim();
+  const department = String(req.body.department || '').trim();
+
+  if (!fullName) {
+    return res.status(400).json({ message: 'Full name is required.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Enter a valid staff email address.' });
+  }
+
+  try {
+    const temporaryPassword = randomBytes(12).toString('base64url');
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    const result = await pool.query(
+      `INSERT INTO users (
+         full_name, email, password_hash, must_change_password, role, account_type, employee_id, department
+       ) VALUES ($1, $2, $3, TRUE, 'IT Staff', 'IT Staff', $4, $5)
+       RETURNING user_id, full_name, email, employee_id, department, must_change_password, created_at`,
+      [fullName, email, passwordHash, employeeId || null, department || null]
+    );
+
+    return res.status(201).json({ staff: result.rows[0], temporaryPassword });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ message: 'An account with that email already exists.' });
+    }
+    console.error('Create IT staff error:', error);
+    return res.status(500).json({ message: 'Unable to create IT staff account.' });
   }
 });
 
