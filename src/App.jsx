@@ -7,45 +7,689 @@ const users = [
   { username: 'itstaff', password: 'staff123', role: 'staff', name: 'Jordan Lee', email: 'jordan.lee@university.edu', department: 'Information Technology', id: 'IT-0042' },
   { username: 'admin', password: 'admin123', role: 'admin', name: 'Dr. Alicia Reyes', email: 'alicia.reyes@university.edu', department: 'Information Technology', id: 'ADM-0001' }
 ];
-const staff = [{ name: 'Jordan Lee', username: 'itstaff' }, { name: 'Priya Shah', username: 'staff2' }, { name: 'Marcus Chen', username: 'staff3' }];
-const categories = ['Account & Access','Password Reset','Locked Account','Computer/Laptop Issue','Network/Internet','Email Issue','Software/Application','Printer/Peripheral','System/Portal Issue','Access Permission','Other'];
-const statuses = ['Open','Assigned','In Progress','Pending User','Resolved','Closed'];
-const priorities = ['Low','Normal','High','Urgent'];
-const seedTickets = [
-  { id:'IT-2026-001', subject:'Locked Account', category:'Locked Account', description:'I cannot access my university account.', priority:'Normal', status:'Open', requesterId:'user', requesterName:'Miguel Mendoza', requesterEmail:'miguel.mendoza@university.edu', assignedTo:null, createdAt:'2026-09-09T09:30:00', updatedAt:'2026-09-09T09:30:00', messages:[], internalNotes:[], history:[{actor:'System', text:'Ticket created', at:'2026-09-09T09:30:00'}] },
-  { id:'IT-2026-002', subject:'No Internet Connection', category:'Network/Internet', description:'The wireless connection in the library is unavailable.', priority:'High', status:'In Progress', requesterId:'student', requesterName:'Student User', requesterEmail:'student@university.edu', assignedTo:'Jordan Lee', createdAt:'2026-09-10T10:00:00', updatedAt:'2026-09-11T08:00:00', messages:[{author:'Jordan Lee', role:'IT Staff', text:'We are checking the access point.', at:'2026-09-11T08:00:00'}], internalNotes:[], history:[] },
-  { id:'IT-2026-003', subject:'Forgotten Password', category:'Password Reset', description:'Please help me reset my portal password.', priority:'Normal', status:'Resolved', requesterId:'faculty', requesterName:'Faculty User', requesterEmail:'faculty@university.edu', assignedTo:'Priya Shah', createdAt:'2026-09-05T08:00:00', updatedAt:'2026-09-06T15:00:00', messages:[{author:'Priya Shah', role:'IT Staff', text:'Your password has been reset. Please sign in again.', at:'2026-09-06T15:00:00'}], internalNotes:[], history:[] },
-  { id:'IT-2026-004', subject:'Printer Not Working', category:'Printer/Peripheral', description:'The printer in Room 204 is displaying an error.', priority:'Low', status:'Pending User', requesterId:'staff', requesterName:'Staff User', requesterEmail:'staff@university.edu', assignedTo:'Marcus Chen', createdAt:'2026-09-03T13:00:00', updatedAt:'2026-09-04T11:00:00', messages:[], internalNotes:[], history:[] },
-  { id:'IT-2026-005', subject:'University Portal Error', category:'System/Portal Issue', description:'The enrollment portal shows an unexpected error.', priority:'High', status:'Resolved', requesterId:'student', requesterName:'Student User', requesterEmail:'student@university.edu', assignedTo:'Jordan Lee', createdAt:'2026-08-28T09:00:00', updatedAt:'2026-08-29T16:00:00', messages:[], internalNotes:[], history:[] }
+
+const staff = [
+  { name: 'Jordan Lee', username: 'itstaff' },
+  { name: 'Priya Shah', username: 'staff2' },
+  { name: 'Marcus Chen', username: 'staff3' }
 ];
-const seedNotifications = [{ id:1, role:'staff', text:'New ticket IT-2026-001 has been submitted.', read:false }, { id:2, role:'user', text:'Welcome to CampusHelp. Your tickets will appear here.', read:true }];
-function initialData(){ try { const d=JSON.parse(localStorage.getItem(KEY)); if(d?.tickets) return d; } catch {} return {tickets:seedTickets, notifications:seedNotifications, next:6}; }
-function persist(d){ localStorage.setItem(KEY, JSON.stringify(d)); }
-function fmt(v){ return new Date(v).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
-function time(v){ return new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
-function Icon({children}){ return <span className="icon" aria-hidden="true">{children}</span>; }
-function Logo(){ return <Link className="brand" to="/"><span className="logo"><Icon>⌁</Icon></span><span><b>CampusHelp</b><small>Department of Information Technology</small></span></Link>; }
-function Status({value}){ return <span className={'badge status-'+value.toLowerCase().replaceAll(' ','-')}>{value}</span>; }
-function Priority({value}){ return <span className={'priority priority-'+value.toLowerCase()}><i/> {value}</span>; }
-function Protected({role, children}){ const session=JSON.parse(localStorage.getItem('campushelp-session')||'null'); if(!session) return <Navigate to="/login" replace/>; if(role && session.role!==role) return <Navigate to={'/'+session.role+'/dashboard'} replace/>; return children; }
-function useData(){ const [data,setData]=useState(initialData); const update=fn=>setData(old=>{const next=fn({...old,tickets:old.tickets.map(x=>({...x})),notifications:[...old.notifications]}); persist(next); return next;}); return [data,update]; }
-function Shell({role, children}){ const nav=useNavigate(); const session=JSON.parse(localStorage.getItem('campushelp-session')||'null'); const [data,update]=useData(); const loc=useLocation(); const [open,setOpen]=useState(false); const links={user:[['Dashboard','/user/dashboard','⌂'],['Create Ticket','/user/create-ticket','＋'],['My Tickets','/user/tickets','▤'],['Notifications','/user/notifications','♢'],['Profile','/user/profile','◉']],staff:[['Dashboard','/staff/dashboard','⌂'],['All Tickets','/staff/tickets','▤'],['My Assigned Tickets','/staff/assigned','✓'],['Notifications','/staff/notifications','♢'],['Profile','/staff/profile','◉']],admin:[['Dashboard','/admin/dashboard','⌂'],['All Tickets','/admin/tickets','▤'],['Users','/admin/users','♙'],['IT Staff','/admin/staff','♧'],['Reports & Analytics','/admin/analytics','▥'],['Settings','/admin/settings','⚙']]}; const unread=data.notifications.filter(n=>n.role===role&&!n.read).length;
-  function logout(){ localStorage.removeItem('campushelp-session'); nav('/login'); }
-  return <div className="app-shell"><aside className={open?'sidebar open':'sidebar'}><Logo/><div className="side-label">WORKSPACE</div><nav>{links[role].map(([label,to,ic])=><Link key={to} className={loc.pathname===to?'active':''} to={to} onClick={()=>setOpen(false)}><Icon>{ic}</Icon>{label}{label==='Notifications'&&unread>0&&<em>{unread}</em>}</Link>)}</nav><div className="side-bottom"><div className="support-card"><strong>Need help?</strong><span>Our IT team is here for you.</span><Link to={'/'+role+'/tickets'}>View support center →</Link></div><button className="logout" onClick={logout}><Icon>↪</Icon> Log out</button></div></aside><div className="main-area"><header className="topbar"><button className="mobile-menu" onClick={()=>setOpen(!open)}>☰</button><div className="crumb">{role==='admin'?'Administration':role==='staff'?'IT Staff workspace':'My workspace'} <span>/</span> {loc.pathname.split('/').pop().replaceAll('-',' ')}</div><div className="top-user"><div className="avatar">{session?.name?.split(' ').map(x=>x[0]).join('')}</div><div><b>{session?.name}</b><small>{role==='admin'?'Administrator':role==='staff'?'IT Staff':'Student'}</small></div></div></header><main className="content">{children}</main></div></div>;
+
+const categories = [
+  'Account & Access',
+  'Password Reset',
+  'Locked Account',
+  'Computer/Laptop Issue',
+  'Network/Internet',
+  'Email Issue',
+  'Software/Application',
+  'Printer/Peripheral',
+  'System/Portal Issue'
+];
+
+const statuses = ['Open', 'Assigned', 'In Progress', 'Pending User', 'Resolved', 'Closed'];
+const priorities = ['Low', 'Normal', 'High', 'Urgent'];
+
+const seedTickets = [
+  { id: 'IT-2026-001', subject: 'Locked Account', category: 'Locked Account', description: 'I cannot access my university account.', priority: 'Normal', status: 'Open', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-18T09:00:00.000Z' },
+  { id: 'IT-2026-002', subject: 'No Internet Connection', category: 'Network/Internet', description: 'The wireless connection in the library is unavailable.', priority: 'High', status: 'In Progress', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-19T11:30:00.000Z' },
+  { id: 'IT-2026-003', subject: 'Forgotten Password', category: 'Password Reset', description: 'Please help me reset my portal password.', priority: 'Normal', status: 'Resolved', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-15T14:20:00.000Z' },
+  { id: 'IT-2026-004', subject: 'Printer Not Working', category: 'Printer/Peripheral', description: 'The printer in Room 204 is displaying an error.', priority: 'Low', status: 'Pending User', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-22T08:10:00.000Z' },
+  { id: 'IT-2026-005', subject: 'University Portal Error', category: 'System/Portal Issue', description: 'The enrollment portal shows an unexpected error.', priority: 'High', status: 'Resolved', requesterId: 'user', requesterName: 'Miguel Mendoza', assignedTo: 'itstaff', createdAt: '2026-01-14T13:40:00.000Z' }
+];
+
+const seedNotifications = [
+  { id: 1, role: 'staff', text: 'New ticket IT-2026-001 has been submitted.', read: false },
+  { id: 2, role: 'user', text: 'Welcome to CampusHelp. Your tickets will appear here.', read: true },
+  { id: 3, role: 'admin', text: 'IT staff review summary is ready.', read: false }
+];
+
+function initialData() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY));
+    if (saved?.tickets) return saved;
+  } catch {}
+  return { tickets: seedTickets, notifications: seedNotifications, next: 6 };
 }
-function PageHead({eyebrow,title,description,action}){ return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{description&&<p>{description}</p>}</div>{action}</div>; }
-function Cards({items}){return <div className="stat-grid">{items.map(x=><div className="stat-card" key={x.label}><div className={'stat-icon '+(x.tone||'')}><Icon>{x.icon}</Icon></div><div><span>{x.label}</span><strong>{x.value}</strong><small>{x.note}</small></div></div>)}</div>}
-function TicketTable({tickets, linkPrefix, empty='No tickets found.'}){const navigate=useNavigate(); if(!tickets.length)return <div className="empty"><div>⌁</div><h3>{empty}</h3><p>Try adjusting your filters or create a new ticket.</p></div>; return <div className="table-wrap"><table><thead><tr><th>Ticket ID</th><th>Requester</th><th>Subject</th><th>Category</th><th>Priority</th><th>Date submitted</th><th>Assigned to</th><th>Status</th></tr></thead><tbody>{tickets.map(t=><tr key={t.id} onClick={()=>linkPrefix&&navigate(linkPrefix+'/'+t.id)}><td><b className="ticket-id">{t.id}</b></td><td>{t.requesterName}</td><td><strong>{t.subject}</strong></td><td>{t.category}</td><td><Priority value={t.priority}/></td><td>{fmt(t.createdAt)}</td><td>{t.assignedTo||<span className="muted">Unassigned</span>}</td><td><Status value={t.status}/></td></tr>)}</tbody></table></div>}
-function FilterBar({setSearch, setStatus, setCategory, setPriority, staffFilter=false}){return <div className="filters"><label className="search">⌕<input placeholder="Search tickets..." onChange={e=>setSearch(e.target.value)}/></label><select onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option>{statuses.map(x=><option key={x}>{x}</option>)}</select><select onChange={e=>setCategory(e.target.value)}><option value="">All categories</option>{categories.map(x=><option key={x}>{x}</option>)}</select>{staffFilter&&<select onChange={e=>setPriority(e.target.value)}><option value="">All priorities</option>{priorities.map(x=><option key={x}>{x}</option>)}</select>}</div>}
-function Dashboard({role}){const [data]=useData(); const session=JSON.parse(localStorage.getItem('campushelp-session')); const mine=role==='user'?data.tickets.filter(t=>t.requesterId==='user'):data.tickets; const counts=s=>mine.filter(t=>t.status===s).length; const cards=role==='user'?[['Open',counts('Open'),'blue','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Resolved',counts('Resolved'),'green','✓'],['Total Tickets',mine.length,'orange','▤']]:role==='staff'?[['New Tickets',counts('Open'),'blue','✦'],['Open Tickets',counts('Open'),'orange','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Pending User',counts('Pending User'),'amber','!'],['Resolved',counts('Resolved'),'green','✓']]:[['Total Tickets',data.tickets.length,'blue','▤'],['Open Tickets',data.tickets.filter(t=>['Open','Assigned'].includes(t.status)).length,'orange','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Resolved',counts('Resolved'),'green','✓'],['Avg. Resolution','2.4d','blue','◷']]; return <><PageHead eyebrow={role==='admin'?'ADMINISTRATION':'OVERVIEW'} title={role==='admin'?'CampusHelp Analytics':<>Welcome back, {session.name.split(' ')[0]}</>} description={role==='admin'?'A clear view of your department’s support operations.':'Here’s what is happening with your support requests today.'} action={role==='user'&&<Link className="button primary" to="/user/create-ticket">＋ Create New Ticket</Link>}/><Cards items={cards.map(([label,value,tone,icon])=>({label,value,tone,icon,note:label==='Total Tickets'?'Across all time':label==='Resolved'?'Successfully resolved':'Updated today'}))}/>{role==='admin'?<AdminOverview tickets={data.tickets}/>:<section className="panel"><div className="panel-head"><div><h2>{role==='staff'?'Ticket queue':'Recent tickets'}</h2><p>{role==='staff'?'Tickets that need your team’s attention.':'Keep track of your latest support requests.'}</p></div><Link to={role==='staff'?'/staff/tickets':'/user/tickets'} className="text-link">View all →</Link></div><TicketTable tickets={mine.slice(0,5)} linkPrefix={role==='staff'?'/staff/tickets':'/user/tickets'}/></section>}</>}
-function AdminOverview({tickets}){const byCat=categories.slice(0,6).map(c=>[c,tickets.filter(t=>t.category===c).length]); const max=Math.max(1,...byCat.map(x=>x[1])); return <div className="two-col"><section className="panel"><div className="panel-head"><div><h2>Tickets by category</h2><p>Distribution across support areas.</p></div><Link className="text-link" to="/admin/analytics">View report →</Link></div><div className="bars">{byCat.map(([c,n])=><div className="bar-row" key={c}><span>{c}</span><div><i style={{width:`${n/max*100}%`}}/></div><b>{n}</b></div>)}</div></section><section className="panel"><div className="panel-head"><div><h2>Tickets by status</h2><p>Current workload snapshot.</p></div></div><div className="status-list">{statuses.slice(0,5).map(s=><div key={s}><span><Status value={s}/></span><b>{tickets.filter(t=>t.status===s).length}</b></div>)}</div></section></div>}
-function TicketList({role, assigned=false}){const [data]=useData(); const [search,setSearch]=useState(''),[status,setStatus]=useState(''),[category,setCategory]=useState(''),[priority,setPriority]=useState(''); let tickets=data.tickets.filter(t=>role==='user'?t.requesterId==='user':(!assigned||t.assignedTo==='Jordan Lee')); tickets=tickets.filter(t=>JSON.stringify(t).toLowerCase().includes(search.toLowerCase())&&(!status||t.status===status)&&(!category||t.category===category)&&(!priority||t.priority===priority)); return <><PageHead eyebrow={role==='user'?'SUPPORT REQUESTS':'TICKET MANAGEMENT'} title={assigned?'My assigned tickets':role==='user'?'My tickets':'All tickets'} description="Search, filter, and select a ticket to view its details." action={role==='user'&&<Link className="button primary" to="/user/create-ticket">＋ Create Ticket</Link>}/><section className="panel"><FilterBar {...{setSearch,setStatus,setCategory,setPriority}} staffFilter={role!=='user'}/><TicketTable tickets={tickets} linkPrefix={'/'+role+'/tickets'}/></section></>}
-function CreateTicket(){const [data,update]=useData(); const nav=useNavigate(); const [form,setForm]=useState({subject:'',category:'',description:'',priority:'Normal'}); const [error,setError]=useState(''); function submit(e){e.preventDefault();if(!form.subject||!form.category||!form.description)return setError('Please complete the required fields.');const now=new Date().toISOString();const id=`IT-2026-${String(data.next).padStart(3,'0')}`;const ticket={...form,id,status:'Open',requesterId:'user',requesterName:'Miguel Mendoza',requesterEmail:'miguel.mendoza@university.edu',assignedTo:null,createdAt:now,updatedAt:now,messages:[],internalNotes:[],history:[{actor:'System',text:'Ticket created',at:now}]};update(d=>({...d,next:d.next+1,tickets:[ticket,...d.tickets],notifications:[{id:Date.now(),role:'staff',text:`New ticket ${id} has been submitted.`,read:false},...d.notifications]}));nav('/user/tickets/'+id);}
- return <><PageHead eyebrow="NEW REQUEST" title="Create a ticket" description="Tell us what you need help with and our IT team will get back to you."/><form className="form-card" onSubmit={submit}><div className="form-grid"><label>Subject <span>*</span><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="Unable to access my university account"/></label><label>Category <span>*</span><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option value="">Select a category</option>{categories.map(x=><option key={x}>{x}</option>)}</select></label><label className="full">Description <span>*</span><textarea rows="7" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Describe the issue and any steps you have already tried."/></label><label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{priorities.map(x=><option key={x}>{x}</option>)}</select></label><label>Attachment<small className="hint">Attach screenshot or supporting file (optional)</small><input type="file"/></label></div>{error&&<div className="error">{error}</div>}<div className="form-actions"><Link className="button secondary" to="/user/dashboard">Cancel</Link><button className="button primary">Submit Ticket</button></div></form></>}
-function TicketDetail({role}){const {ticketId}=useParams(); const [data,update]=useData(); const ticket=data.tickets.find(t=>t.id===ticketId); const nav=useNavigate(); const [reply,setReply]=useState(''); const [note,setNote]=useState(''); const [draft,setDraft]=useState(ticket||{}); if(!ticket)return <div className="empty"><h3>Ticket not found</h3><Link to={'/'+role+'/tickets'}>Return to tickets</Link></div>; const canEdit=role!=='user'; function save(withReply=false){const now=new Date().toISOString();let message=withReply&&reply?{author:'Jordan Lee',role:'IT Staff',text:reply,at:now}:null; const changed=[];if(draft.status!==ticket.status)changed.push(`Status changed from ${ticket.status} to ${draft.status}.`);if(draft.assignedTo!==ticket.assignedTo)changed.push(`Ticket assigned to ${draft.assignedTo||'Unassigned'}.`);update(d=>({...d,tickets:d.tickets.map(t=>t.id!==ticketId?t:{...t,...draft,updatedAt:now,messages:message?[...t.messages,message]:t.messages,internalNotes:note?[...t.internalNotes,{author:'Jordan Lee',text:note,at:now}]:t.internalNotes,history:[...t.history,...changed.map(text=>({actor:'System',text,at:now})),...(message?[{actor:'Jordan Lee',text:'IT Staff responded',at:now}]:[])]}),notifications:withReply||changed.length? [{id:Date.now(),role:'user',text:withReply?`IT Staff replied to your ticket ${ticketId}.`:`Your ticket ${ticketId} status has changed to ${draft.status}.`,read:false},...d.notifications]:d.notifications}));setReply('');setNote('');nav('/'+role+'/tickets/'+ticketId);}
- return <><PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">{ticket.id}</span>} action={<Link className="button secondary" to={'/'+role+'/tickets'}>← Back to tickets</Link>}/><div className="detail-grid"><div><section className="panel ticket-summary"><div className="summary-top"><div><span className="muted">Current status</span><Status value={ticket.status}/></div><Priority value={ticket.priority}/></div><h2>{ticket.subject}</h2><p>{ticket.description}</p><div className="meta-grid"><span><b>Category</b>{ticket.category}</span><span><b>Submitted</b>{fmt(ticket.createdAt)}</span><span><b>Last updated</b>{fmt(ticket.updatedAt)}</span><span><b>Assigned IT staff</b>{ticket.assignedTo||'Unassigned'}</span></div></section><section className="panel"><div className="panel-head"><div><h2>Conversation</h2><p>Updates and responses on this request.</p></div></div><div className="timeline">{ticket.history.map((h,i)=><div className="timeline-item" key={i}><div className="timeline-dot">{h.actor==='System'?'⌁':'◉'}</div><div><b>{h.actor}</b><small>{time(h.at)}</small><p>{h.text}</p></div></div>)}{ticket.messages.map((m,i)=><div className="timeline-item" key={'m'+i}><div className="timeline-dot">◉</div><div><b>{m.author} <small>{m.role}</small></b><small>{time(m.at)}</small><p>{m.text}</p></div></div>)}</div></section></div>{canEdit&&<aside><section className="panel"><div className="panel-head"><h2>Manage ticket</h2></div><label>Status<select value={draft.status} onChange={e=>setDraft({...draft,status:e.target.value})}>{statuses.map(x=><option key={x}>{x}</option>)}</select></label><label>Assignment<select value={draft.assignedTo||''} onChange={e=>setDraft({...draft,assignedTo:e.target.value||null})}><option value="">Unassigned</option>{staff.map(x=><option key={x.name}>{x.name}</option>)}</select></label><label>Priority<select value={draft.priority} onChange={e=>setDraft({...draft,priority:e.target.value})}>{priorities.map(x=><option key={x}>{x}</option>)}</select></label><button className="button primary full-button" onClick={()=>save(false)}>Save Changes</button><button className="button success full-button" onClick={()=>{setDraft({...draft,status:'Resolved'});setTimeout(()=>save(false),0)}}>✓ Mark as Resolved</button></section><section className="panel"><h2>Respond to requester</h2><textarea rows="5" value={reply} onChange={e=>setReply(e.target.value)} placeholder="Write a response..."/><button className="button primary full-button" onClick={()=>save(true)} disabled={!reply}>Send Response</button><h3 className="note-title">Internal note</h3><textarea rows="3" value={note} onChange={e=>setNote(e.target.value)} placeholder="Visible only to IT Staff and Admin"/></section></aside>}</div></>}
-function Notifications({role}){const [data,update]=useData();const notes=data.notifications.filter(n=>n.role===role);return <><PageHead eyebrow="INBOX" title="Notifications" description="Stay up to date with activity on your support tickets."/><section className="panel notification-list">{notes.map(n=><div className={n.read?'notification':'notification unread'} key={n.id}><div className="notification-icon">♢</div><div><p>{n.text}</p><small>CampusHelp notification</small></div>{!n.read&&<button onClick={()=>update(d=>({...d,notifications:d.notifications.map(x=>x.id===n.id?{...x,read:true}:x)}))}>Mark read</button>}</div>)}</section></>}
-function Profile({role}){const u=users.find(x=>x.role===role);return <><PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account information."/><section className="profile-card"><div className="profile-avatar">{u.name.split(' ').map(x=>x[0]).join('')}</div><h2>{u.name}</h2><p>{u.email}</p><div className="profile-fields"><span><b>{role==='user'?'Student ID':role==='staff'?'Employee ID':'Account ID'}</b>{u.id}</span><span><b>Department</b>{u.department}</span><span><b>Role</b>{role==='admin'?'Administrator':role==='staff'?'IT Staff':'User'}</span></div></section></>}
-function AdminPages({type}){const [data]=useData(); if(type==='users')return <><PageHead eyebrow="ADMINISTRATION" title="Users" description="Directory of CampusHelp users."/><section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th></tr></thead><tbody>{users.map(u=><tr key={u.username}><td><strong>{u.name}</strong></td><td>{u.username}</td><td>{u.email}</td><td>{u.department}</td><td>{u.role}</td><td><span className="online">Active</span></td></tr>)}</tbody></table></div></section></>; if(type==='staff')return <><PageHead eyebrow="ADMINISTRATION" title="IT Staff" description="Monitor team capacity and workload."/><section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Employee ID</th><th>Email</th><th>Active tickets</th><th>Resolved tickets</th><th>Status</th></tr></thead><tbody>{staff.map(s=><tr key={s.username}><td><strong>{s.name}</strong></td><td>IT-0042</td><td>{s.username}@university.edu</td><td>{data.tickets.filter(t=>t.assignedTo===s.name&&!['Resolved','Closed'].includes(t.status)).length}</td><td>{data.tickets.filter(t=>t.assignedTo===s.name&&t.status==='Resolved').length}</td><td><span className="online">Available</span></td></tr>)}</tbody></table></div></section></>; return <><PageHead eyebrow="REPORTS & ANALYTICS" title="Reports & Analytics" description="Explore trends derived from the live ticket dataset."/><AdminOverview tickets={data.tickets}/><section className="panel"><div className="panel-head"><div><h2>Tickets over time</h2><p>Ticket volume by recent submission date.</p></div></div><div className="line-chart">{[1,2,3,4,5,6,7].map((x,i)=><div key={x} style={{height:`${25+(data.tickets.length*13+i*8)%65}%`}}><i/><span>Sep {x+1}</span></div>)}</div></section></>}
-function Login(){const nav=useNavigate();const [form,setForm]=useState({username:'',password:'',remember:true});const [error,setError]=useState('');function submit(e){e.preventDefault();const u=users.find(x=>x.username===form.username&&x.password===form.password);if(!u)return setError('Invalid username or password.');localStorage.setItem('campushelp-session',JSON.stringify(u));nav('/'+u.role+'/dashboard');}return <div className="login-page"><div className="login-art"><Logo/><div className="art-copy"><div className="eyebrow">UNIVERSITY IT SUPPORT</div><h1>Help when you need it.<br/><em>Support you can trust.</em></h1><p>CampusHelp makes it simple to report technology issues and stay connected with the people working to solve them.</p><div className="art-stat"><b>24/7</b><span>IT support visibility<br/>for our campus community</span></div></div></div><div className="login-panel"><div className="login-form"><div className="mobile-logo"><Logo/></div><div className="eyebrow">WELCOME BACK</div><h1>Sign in to CampusHelp</h1><p>Use your university credentials to continue.</p><form onSubmit={submit}><label>Username<input autoFocus value={form.username} onChange={e=>setForm({...form,username:e.target.value})} placeholder="Enter your username"/></label><label>Password<div className="password"><input type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="Enter your password"/><span>◉</span></div></label><div className="login-options"><label className="check"><input type="checkbox" checked={form.remember} onChange={e=>setForm({...form,remember:e.target.checked})}/> Remember me</label><a href="#forgot">Forgot password?</a></div>{error&&<div className="error">{error}</div>}<button className="button primary login-button">Sign in</button></form><div className="demo"><b>Demo accounts</b><span>User: <code>user / user123</code></span><span>IT Staff: <code>itstaff / staff123</code></span><span>Admin: <code>admin / admin123</code></span></div></div></div></div>}
-export default function App(){return <Routes><Route path="/login" element={<Login/>}/><Route path="/" element={<Navigate to="/login" replace/>}/><Route path="/user/*" element={<Protected role="user"><Shell role="user"><Routes><Route path="dashboard" element={<Dashboard role="user"/>}/><Route path="create-ticket" element={<CreateTicket/>}/><Route path="tickets" element={<TicketList role="user"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="user"/>}/><Route path="notifications" element={<Notifications role="user"/>}/><Route path="profile" element={<Profile role="user"/>}/></Routes></Shell></Protected>}/><Route path="/staff/*" element={<Protected role="staff"><Shell role="staff"><Routes><Route path="dashboard" element={<Dashboard role="staff"/>}/><Route path="tickets" element={<TicketList role="staff"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="staff"/>}/><Route path="assigned" element={<TicketList role="staff" assigned/>}/><Route path="notifications" element={<Notifications role="staff"/>}/><Route path="profile" element={<Profile role="staff"/>}/></Routes></Shell></Protected>}/><Route path="/admin/*" element={<Protected role="admin"><Shell role="admin"><Routes><Route path="dashboard" element={<Dashboard role="admin"/>}/><Route path="tickets" element={<TicketList role="admin"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="admin"/>}/><Route path="users" element={<AdminPages type="users"/>}/><Route path="staff" element={<AdminPages type="staff"/>}/><Route path="analytics" element={<AdminPages type="analytics"/>}/><Route path="settings" element={<Profile role="admin"/>}/></Routes></Shell></Protected>}/></Routes>}
+
+function persist(data) {
+  localStorage.setItem(KEY, JSON.stringify(data));
+}
+
+function getSession() {
+  return JSON.parse(localStorage.getItem('campushelp-session') || 'null');
+}
+
+function setSession(session) {
+  localStorage.setItem('campushelp-session', JSON.stringify(session));
+}
+
+function fmt(value) {
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function time(value) {
+  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function Icon({ children }) {
+  return <span className="icon" aria-hidden="true">{children}</span>;
+}
+
+function Logo() {
+  return (
+    <Link className="brand" to="/">
+      <span className="logo"><Icon>⌁</Icon></span>
+      <span>
+        <b>CampusHelp</b>
+        <small>Department of Information Technology</small>
+      </span>
+    </Link>
+  );
+}
+
+function Status({ value }) {
+  return <span className={'badge status-' + value.toLowerCase().replaceAll(' ', '-')}>{value}</span>;
+}
+
+function Priority({ value }) {
+  return <span className={'priority priority-' + value.toLowerCase()}><i /> {value}</span>;
+}
+
+function Protected({ role, children }) {
+  const session = getSession();
+
+  if (!session) return <Navigate to="/login" replace />;
+  if (role && session.role !== role) return <Navigate to={session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard'} replace />;
+
+  return children;
+}
+
+function useData() {
+  const [data, setData] = useState(initialData);
+
+  const update = (fn) => {
+    setData((old) => {
+      const next = fn({ ...old, tickets: old.tickets.map((ticket) => ({ ...ticket })), notifications: [...old.notifications] });
+      persist(next);
+      return next;
+    });
+  };
+
+  return [data, update];
+}
+
+function Shell({ role, children }) {
+  const navigate = useNavigate();
+  const [data] = useData();
+  const [open, setOpen] = useState(false);
+  const session = getSession();
+
+  const links = {
+    user: [
+      ['Dashboard', '/user/dashboard', '⌂'],
+      ['My Tickets', '/user/tickets', '▣'],
+      ['Create Ticket', '/user/create-ticket', '＋'],
+      ['Notifications', '/user/notifications', '◌'],
+      ['Profile', '/user/profile', '◍']
+    ],
+    staff: [
+      ['Dashboard', '/staff/dashboard', '⌂'],
+      ['Tickets', '/staff/tickets', '▣'],
+      ['Notifications', '/staff/notifications', '◌'],
+      ['Profile', '/staff/profile', '◍']
+    ],
+    admin: [
+      ['Dashboard', '/admin/dashboard', '⌂'],
+      ['Tickets', '/admin/tickets', '▣'],
+      ['Overview', '/admin/overview', '◫'],
+      ['Notifications', '/admin/notifications', '◌'],
+      ['Profile', '/admin/profile', '◍']
+    ]
+  };
+
+  function logout() {
+    localStorage.removeItem('campushelp-session');
+    navigate('/login');
+  }
+
+  const unread = data.notifications.filter((n) => (n.role === role || n.role === session?.role) && !n.read).length;
+
+  return (
+    <div className="app-shell">
+      <aside className={open ? 'sidebar open' : 'sidebar'}>
+        <Logo />
+        <div className="side-label">WORKSPACE</div>
+        <nav>
+          {links[role].map(([label, to, icon]) => (
+            <Link key={to} className="nav-link" to={to} onClick={() => setOpen(false)}>
+              <span className="nav-icon">{icon}</span>
+              {label}
+              {label === 'Notifications' && unread ? <span className="dot">{unread}</span> : null}
+            </Link>
+          ))}
+        </nav>
+        <button type="button" className="button secondary full" onClick={logout}>Logout</button>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <button type="button" className="menu-toggle" onClick={() => setOpen(!open)}>☰</button>
+          <div className="topbar-title">CampusHelp</div>
+        </header>
+        <div className="content-wrap">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+function PageHead({ eyebrow, title, description, action }) {
+  return (
+    <div className="page-head">
+      <div>
+        <div className="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        {description && <p>{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function Cards({ items }) {
+  return (
+    <div className="stat-grid">
+      {items.map((item) => (
+        <div className="stat-card" key={item.label}>
+          <div className={'stat-icon ' + (item.tone || '')}><Icon>{item.icon}</Icon></div>
+          <div>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TicketTable({ tickets, linkPrefix, empty = 'No tickets found.' }) {
+  const navigate = useNavigate();
+
+  if (!tickets.length) {
+    return (
+      <div className="empty">
+        <div>⌁</div>
+        <h3>{empty}</h3>
+      </div>
+    );
+  }
+
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Subject</th>
+            <th>Category</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tickets.map((ticket) => (
+            <tr key={ticket.id} onClick={() => navigate(`${linkPrefix}/${ticket.id}`)} style={{ cursor: 'pointer' }}>
+              <td>{ticket.id}</td>
+              <td>{ticket.subject}</td>
+              <td>{ticket.category}</td>
+              <td><Status value={ticket.status} /></td>
+              <td><Priority value={ticket.priority} /></td>
+              <td>{fmt(ticket.createdAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FilterBar({ setSearch, setStatus, setCategory, setPriority, staffFilter = false }) {
+  return (
+    <div className="filters">
+      <label className="search">⌕
+        <input placeholder="Search tickets..." onChange={(e) => setSearch(e.target.value)} />
+      </label>
+      <select defaultValue="" onChange={(e) => setStatus(e.target.value)}>
+        <option value="">All statuses</option>
+        {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+      </select>
+      <select defaultValue="" onChange={(e) => setCategory(e.target.value)}>
+        <option value="">All categories</option>
+        {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+      </select>
+      {!staffFilter && (
+        <select defaultValue="" onChange={(e) => setPriority(e.target.value)}>
+          <option value="">All priorities</option>
+          {priorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ role }) {
+  const session = getSession();
+  const [data] = useData();
+
+  const mine = role === 'user'
+    ? data.tickets.filter((ticket) => ticket.requesterId === session.username)
+    : data.tickets.filter((ticket) => ticket.assignedTo === session.username || ticket.assignedTo === 'itstaff');
+
+  const cards = [
+    { label: 'Total Tickets', value: data.tickets.length, tone: 'blue', icon: '▣' },
+    { label: 'Open', value: data.tickets.filter((ticket) => ticket.status === 'Open').length, tone: 'green', icon: '⌂' },
+    { label: 'In Progress', value: data.tickets.filter((ticket) => ticket.status === 'In Progress').length, tone: 'amber', icon: '◌' },
+    { label: 'Resolved', value: data.tickets.filter((ticket) => ['Resolved', 'Closed'].includes(ticket.status)).length, tone: 'cyan', icon: '✓' }
+  ];
+
+  return (
+    <>
+      <PageHead eyebrow="Overview" title={role === 'user' ? 'My Dashboard' : role === 'staff' ? 'IT Staff Dashboard' : 'Admin Dashboard'} description={`Welcome, ${session?.name || 'User'}.`} />
+      <Cards items={cards} />
+
+      <div className="two-col">
+        <section className="panel-card">
+          <div className="panel-head"><h3>Recent Tickets</h3></div>
+          <TicketTable tickets={mine.slice(0, 5)} linkPrefix={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'} empty="No tickets yet." />
+        </section>
+
+        <section className="panel-card">
+          <div className="panel-head"><h3>Notifications</h3></div>
+          <ul className="notification-list">
+            {data.notifications.filter((notification) => notification.role === role || notification.role === 'staff' || notification.role === 'admin').slice(0, 5).map((item) => (
+              <li key={item.id}><span>{item.text}</span></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function TicketList({ role, assigned = false }) {
+  const [data, update] = useData();
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [category, setCategory] = useState('');
+  const [priority, setPriority] = useState('');
+
+  const session = getSession();
+
+  const list = data.tickets.filter((ticket) => {
+    if (role === 'user') {
+      if (ticket.requesterId !== session.username) return false;
+    }
+    if (role === 'staff' && assigned && ticket.assignedTo !== session.username) return false;
+    if (search && !`${ticket.subject} ${ticket.description} ${ticket.id}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (status && ticket.status !== status) return false;
+    if (category && ticket.category !== category) return false;
+    if (priority && ticket.priority !== priority) return false;
+    return true;
+  });
+
+  return (
+    <>
+      <PageHead eyebrow="TICKETS" title="Ticket List" description="Review and monitor submitted requests." action={role === 'user' ? <Link className="button" to="/user/create-ticket">New Ticket</Link> : null} />
+      <FilterBar setSearch={setSearch} setStatus={setStatus} setCategory={setCategory} setPriority={setPriority} staffFilter={role !== 'user'} />
+      <TicketTable tickets={list} linkPrefix={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'} empty="No tickets found." />
+    </>
+  );
+}
+
+function CreateTicket() {
+  const navigate = useNavigate();
+  const [data, update] = useData();
+  const [form, setForm] = useState({ subject: '', category: 'Account & Access', description: '', priority: 'Normal' });
+  const [error, setError] = useState('');
+
+  const session = getSession();
+
+  function submit(e) {
+    e.preventDefault();
+    if (!form.subject.trim() || !form.description.trim()) {
+      setError('Subject and description are required.');
+      return;
+    }
+
+    const ticket = {
+      id: `IT-${new Date().getFullYear()}-${String(data.next).padStart(3, '0')}`,
+      subject: form.subject.trim(),
+      category: form.category,
+      description: form.description.trim(),
+      priority: form.priority,
+      status: 'Open',
+      requesterId: session.username,
+      requesterName: session.name,
+      assignedTo: 'itstaff',
+      createdAt: new Date().toISOString()
+    };
+
+    update((old) => ({
+      ...old,
+      tickets: [ticket, ...old.tickets],
+      notifications: [
+        { id: Date.now(), role: 'staff', text: `New ticket ${ticket.id} has been submitted.`, read: false },
+        ...old.notifications
+      ],
+      next: old.next + 1
+    }));
+
+    navigate('/user/tickets');
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="NEW REQUEST" title="Create a ticket" description="Tell us what you need help with and our IT team will get back to you." />
+      <form className="form-card" onSubmit={submit}>
+        {error && <div className="alert error">{error}</div>}
+
+        <div className="field-grid two-up">
+          <label>
+            <span>Subject</span>
+            <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Brief description of the issue" required />
+          </label>
+
+          <label>
+            <span>Category</span>
+            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {categories.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <label>
+          <span>Problem Description</span>
+          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows="6" placeholder="Describe the issue in detail" required />
+        </label>
+
+        <div className="field-grid two-up">
+          <label>
+            <span>Priority</span>
+            <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+              {priorities.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <div className="suggestion-box">
+            <div><strong>Suggested Category:</strong> {form.category}</div>
+            <div><strong>Suggested Priority:</strong> {form.priority}</div>
+          </div>
+        </div>
+
+        <div className="action-row">
+          <button type="submit" className="button">Submit Ticket</button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function TicketDetail({ role }) {
+  const { ticketId } = useParams();
+  const [data, update] = useData();
+  const [reply, setReply] = useState('');
+  const [error, setError] = useState('');
+  const session = getSession();
+
+  const ticket = data.tickets.find((item) => item.id === ticketId);
+  if (!ticket) {
+    return <div className="empty"><div>⌁</div><h3>Ticket not found.</h3></div>;
+  }
+
+  function updateStatus(nextStatus) {
+    update((old) => ({
+      ...old,
+      tickets: old.tickets.map((item) => item.id === ticketId ? { ...item, status: nextStatus } : item)
+    }));
+  }
+
+  function sendReply() {
+    if (!reply.trim()) return;
+
+    update((old) => ({
+      ...old,
+      tickets: old.tickets.map((item) => item.id === ticketId ? { ...item, status: 'In Progress' } : item),
+      notifications: [
+        { id: Date.now(), role: role === 'user' ? 'staff' : 'user', text: `${session.name} replied on ${ticketId}.`, read: false },
+        ...old.notifications
+      ]
+    }));
+
+    setReply('');
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">#{ticket.id}</span>} action={<Link className="button secondary" to={role === 'user' ? '/user/tickets' : role === 'staff' ? '/staff/tickets' : '/admin/tickets'}>Back</Link>} />
+      {error && <div className="alert error">{error}</div>}
+
+      <section className="panel-card">
+        <div className="field-grid two-up">
+          <div>
+            <p><strong>Category:</strong> {ticket.category}</p>
+            <p><strong>Priority:</strong> <Priority value={ticket.priority} /></p>
+            <p><strong>Requester:</strong> {ticket.requesterName}</p>
+            <p><strong>Assigned:</strong> {ticket.assignedTo ? ticket.assignedTo : 'Unassigned'}</p>
+          </div>
+          <div>
+            {['staff', 'admin'].includes(role) && (
+              <label>
+                <span>Status</span>
+                <select value={ticket.status} onChange={(e) => updateStatus(e.target.value)}>
+                  {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </label>
+            )}
+            <p><strong>Created:</strong> {time(ticket.createdAt)}</p>
+          </div>
+        </div>
+
+        <div className="ticket-description">
+          <h3>Description</h3>
+          <p>{ticket.description}</p>
+        </div>
+      </section>
+
+      <section className="panel-card">
+        <div className="panel-head"><h3>Conversation</h3></div>
+        <div className="message-list">
+          <div className="message-item">
+            <div className="message-meta">
+              <strong>{ticket.requesterName}</strong>
+              <span>{time(ticket.createdAt)}</span>
+            </div>
+            <p>{ticket.description}</p>
+          </div>
+        </div>
+
+        <div className="reply-box">
+          <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows="4" placeholder="Write a response..." />
+          <button type="button" className="button" onClick={sendReply}>Send Reply</button>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function NotificationsPage({ role }) {
+  const [data, update] = useData();
+  const session = getSession();
+
+  const notes = data.notifications.filter((notification) => notification.role === role || notification.role === session?.role);
+
+  function markRead(id) {
+    update((old) => ({
+      ...old,
+      notifications: old.notifications.map((note) => note.id === id ? { ...note, read: true } : note)
+    }));
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="INBOX" title="Notifications" description="Stay up to date with the latest CampusHelp activity." />
+      {notes.length ? (
+        <div className="notification-stack">
+          {notes.map((item) => (
+            <div key={item.id} className={'notification-item ' + (item.read ? 'read' : 'unread')}>
+              <div>
+                <strong>{item.text}</strong>
+                <small>{fmt(new Date().toISOString())}</small>
+              </div>
+              {!item.read && <button type="button" className="button secondary" onClick={() => markRead(item.id)}>Mark Read</button>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty"><div>⌁</div><h3>No notifications yet.</h3></div>
+      )}
+    </>
+  );
+}
+
+function Profile({ role }) {
+  const session = getSession();
+  const user = users.find((entry) => entry.role === role);
+
+  return (
+    <>
+      <PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account information." />
+      <section className="profile-card">
+        <div className="profile-row"><strong>Full Name:</strong> <span>{session?.name || user?.name}</span></div>
+        <div className="profile-row"><strong>Email:</strong> <span>{session?.email || user?.email}</span></div>
+        <div className="profile-row"><strong>Role:</strong> <span>{role}</span></div>
+        <div className="profile-row"><strong>Department:</strong> <span>{session?.department || user?.department}</span></div>
+        <div className="profile-row"><strong>Employee ID:</strong> <span>{session?.id || user?.id}</span></div>
+      </section>
+    </>
+  );
+}
+
+function AdminOverview() {
+  const [data] = useData();
+
+  const byCategory = categories.map((category) => [category, data.tickets.filter((ticket) => ticket.category === category).length]);
+  const max = Math.max(1, ...byCategory.map(([, count]) => count));
+
+  return (
+    <>
+      <PageHead eyebrow="ADMINISTRATION" title="Overview" description="High-level visibility into CampusHelp ticket health." />
+      <div className="two-col">
+        <section className="panel-card">
+          <div className="panel-head"><h3>Tickets by Category</h3></div>
+          <ul className="bullet-list">
+            {byCategory.map(([category, count]) => (
+              <li key={category}><span>{category}</span><strong>{count}</strong></li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="panel-card">
+          <div className="panel-head"><h3>Ticket Status Breakdown</h3></div>
+          <ul className="bullet-list">
+            {statuses.map((status) => (
+              <li key={status}><span>{status}</span><strong>{data.tickets.filter((ticket) => ticket.status === status).length}</strong></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function Login() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ username: '', password: '' });
+  const [error, setError] = useState('');
+
+  function submit(e) {
+    e.preventDefault();
+    const match = users.find((user) => user.username === form.username && user.password === form.password);
+    if (!match) {
+      setError('Invalid username or password.');
+      return;
+    }
+
+    const session = { username: match.username, name: match.name, role: match.role, email: match.email, department: match.department, id: match.id };
+    setSession(session);
+    navigate(match.role === 'user' ? '/user/dashboard' : match.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard');
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-panel">
+        <div className="login-art">
+          <div className="brand logo-block">
+            <span className="logo"><Icon>⌁</Icon></span>
+            <div>
+              <b>CampusHelp</b>
+              <small>Department of Information Technology</small>
+            </div>
+          </div>
+          <h1>Need help with your university account or device?</h1>
+          <p>Submit and track requests with the CampusHelp help desk.</p>
+        </div>
+
+        <div className="login-card">
+          <div className="eyebrow">WELCOME BACK</div>
+          <h2>Sign In</h2>
+          <form onSubmit={submit}>
+            {error && <div className="alert error">{error}</div>}
+            <label>
+              <span>Username</span>
+              <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="username" required />
+            </label>
+            <label>
+              <span>Password</span>
+              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Enter your password" required />
+            </label>
+            <button type="submit" className="button full">Login</button>
+            <div className="signup-row">
+              <span>Demo accounts: user / staff / admin</span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const location = useLocation();
+  const session = getSession();
+
+  return (
+    <Routes>
+      <Route path="/login" element={session ? <Navigate to={session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard'} replace /> : <Login />} />
+      <Route path="/" element={<Navigate to={session ? (session.role === 'user' ? '/user/dashboard' : session.role === 'staff' ? '/staff/dashboard' : '/admin/dashboard') : '/login'} replace />} />
+
+      <Route path="/user/dashboard" element={<Protected role="user"><Shell role="user"><Dashboard role="user" /></Shell></Protected>} />
+      <Route path="/user/tickets" element={<Protected role="user"><Shell role="user"><TicketList role="user" /></Shell></Protected>} />
+      <Route path="/user/tickets/:ticketId" element={<Protected role="user"><Shell role="user"><TicketDetail role="user" /></Shell></Protected>} />
+      <Route path="/user/create-ticket" element={<Protected role="user"><Shell role="user"><CreateTicket /></Shell></Protected>} />
+      <Route path="/user/notifications" element={<Protected role="user"><Shell role="user"><NotificationsPage role="user" /></Shell></Protected>} />
+      <Route path="/user/profile" element={<Protected role="user"><Shell role="user"><Profile role="user" /></Shell></Protected>} />
+
+      <Route path="/staff/dashboard" element={<Protected role="staff"><Shell role="staff"><Dashboard role="staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets" element={<Protected role="staff"><Shell role="staff"><TicketList role="staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets/:ticketId" element={<Protected role="staff"><Shell role="staff"><TicketDetail role="staff" /></Shell></Protected>} />
+      <Route path="/staff/notifications" element={<Protected role="staff"><Shell role="staff"><NotificationsPage role="staff" /></Shell></Protected>} />
+      <Route path="/staff/profile" element={<Protected role="staff"><Shell role="staff"><Profile role="staff" /></Shell></Protected>} />
+
+      <Route path="/admin/dashboard" element={<Protected role="admin"><Shell role="admin"><Dashboard role="admin" /></Shell></Protected>} />
+      <Route path="/admin/tickets" element={<Protected role="admin"><Shell role="admin"><TicketList role="admin" /></Shell></Protected>} />
+      <Route path="/admin/tickets/:ticketId" element={<Protected role="admin"><Shell role="admin"><TicketDetail role="admin" /></Shell></Protected>} />
+      <Route path="/admin/overview" element={<Protected role="admin"><Shell role="admin"><AdminOverview /></Shell></Protected>} />
+      <Route path="/admin/notifications" element={<Protected role="admin"><Shell role="admin"><NotificationsPage role="admin" /></Shell></Protected>} />
+      <Route path="/admin/profile" element={<Protected role="admin"><Shell role="admin"><Profile role="admin" /></Shell></Protected>} />
+    </Routes>
+  );
+}
