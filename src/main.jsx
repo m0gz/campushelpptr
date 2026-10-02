@@ -35,16 +35,26 @@ async function apiFetch(path, options = {}) {
     finalHeaders.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(path, {
-    credentials: 'include',
-    ...options,
-    headers: finalHeaders
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      credentials: 'include',
+      ...options,
+      headers: finalHeaders
+    });
+  } catch (error) {
+    throw new Error(`Could not reach ${path}: ${error.message}`);
+  }
 
-  const data = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let data = {};
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {}
 
   if (!response.ok) {
-    throw new Error(data.message || 'Request failed.');
+    const detail = data.message || responseText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    throw new Error(detail || `Request failed (HTTP ${response.status} ${response.statusText}).`);
   }
 
   return data;
