@@ -1,638 +1,996 @@
-import express from 'express';
-import session from 'express-session';
-import pgSession from 'connect-pg-simple';
-import cors from 'cors';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import bcrypt from 'bcryptjs';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 
-import {
-  pool,
-  ensureSchema,
-  seedDefaultAccounts,
-  normalizeEmail,
-  isMapuaEmail,
-  sanitizeUser,
-  logAudit,
-  createNotification
-} from './db.js';
+const STATUS_OPTIONS = ['Open', 'In Progress', 'Resolved', 'Closed'];
+const PRIORITY_OPTIONS = ['Low', 'Medium', 'High', 'Urgent'];
+const CATEGORIES = [
+  'Account and Access',
+  'Password Reset',
+  'Locked Account',
+  'Computer/Laptop Issue',
+  'Network/Internet',
+  'Email Issue',
+  'Software/Application',
+  'Printer/Peripheral',
+  'System/Portal Issue',
+  'Access Permission',
+  'Other'
+];
 
-dotenv.config();
+const ROLE_ROUTES = {
+  User: '/user/dashboard',
+  'IT Staff': '/staff/dashboard',
+  Administrator: '/admin/dashboard'
+};
 
-const app = express();
-const port = Number(process.env.PORT || 3001);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '../uploads');
+const AuthContext = React.createContext(null);
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+function normalizeRole(role) {
+  return role || 'User';
 }
 
-const PgSessionStore = pgSession(session);
+function getDashboardPath(role) {
+  return ROLE_ROUTES[normalizeRole(role)] || '/login';
+}
 
-app.use(
-  cors({
-    origin: true,
-    credentials: true
-  })
-);
+async function apiFetch(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const hasBody = options.body !== undefined && !(options.body instanceof FormData);
 
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use(
-  session({
-    store: new PgSessionStore({
-      pool,
-      tableName: 'session',
-      createTableIfMissing: true
-    }),
-    secret: process.env.SESSION_SECRET || 'campushelp-dev-secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
-      maxAge: 1000 * 60 * 60 * 10
-    }
-  })
-);
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`;
-    cb(null, safeName);
+  if (hasBody) {
+    headers.set('Content-Type', 'application/json');
   }
-});
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
+  const response = await fetch(path, {
+    credentials: 'include',
+    ...options,
+    headers
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Request failed');
+  }
+
+  return data;
+}
+
+function useAuth() {
+  return useContext(AuthContext);
+}
+
+function formatDate(value) {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch (error) {
+    return '—';
+  }
+}
+
+function Icon({ children }) {
+  return <span className="icon" aria-hidden="true">{children}</span>;
+}
+
+function PageHead({ eyebrow, title, description, action }) {
+  return (
+    <div className="page-head">
+      <div>
+        <div className="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        {description && <p>{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function StatusBadge({ value }) {
+  const text = String(value || 'Open');
+  const className = `badge status-${text.toLowerCase().replace(/\s+/g, '-')}`;
+  return <span className={className}>{text}</span>;
+}
+
+function PriorityBadge({ value }) {
+  const text = String(value || 'Medium');
+  const className = `priority priority-${text.toLowerCase()}`;
+  return <span className={className}><i /> {text}</span>;
+}
+
+function Logo() {
+  return (
+    <Link className="brand" to="/">
+      <span className="logo"><Icon>⌁</Icon></span>
+      <span>
+        <b>CampusHelp</b>
+        <small>Department of Information Technology</small>
+      </span>
+    </Link>
+  );
+}
+
+function Protected({ allowedRoles, children }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div className="page-shell"><div className="empty"><h3>Loading CampusHelp...</h3></div></div>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(normalizeRole(user.role))) {
+    return <Navigate to={getDashboardPath(user.role)} replace />;
+  }
+
+  return children;
+}
+
+function Shell({ role, children }) {
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  const links = {
+    User: [
+      ['Dashboard', '/user/dashboard', '⌂'],
+      ['My Tickets', '/user/tickets', '▣'],
+      ['Create Ticket', '/user/create-ticket', '＋'],
+      ['Notifications', '/user/notifications', '◌'],
+      ['Profile', '/user/profile', '◍']
+    ],
+    'IT Staff': [
+      ['Dashboard', '/staff/dashboard', '⌂'],
+      ['Tickets', '/staff/tickets', '▣'],
+      ['Notifications', '/staff/notifications', '◌'],
+      ['Profile', '/staff/profile', '◍']
+    ],
+    Administrator: [
+      ['Dashboard', '/admin/dashboard', '⌂'],
+      ['Tickets', '/admin/tickets', '▣'],
+      ['Analytics', '/admin/analytics', '◫'],
+      ['Notifications', '/admin/notifications', '◌'],
+      ['Profile', '/admin/profile', '◍']
+    ]
+  };
+
+  async function handleLogout() {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+      // ignore, UI logout still should proceed
+    }
+
+    setUser(null);
+    navigate('/login');
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className={open ? 'sidebar open' : 'sidebar'}>
+        <Logo />
+        <div className="side-label">WORKSPACE</div>
+        <nav>
+          {links[role].map(([label, to, icon]) => (
+            <Link key={to} className="nav-link" to={to} onClick={() => setOpen(false)}>
+              <span className="nav-icon">{icon}</span>
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <button type="button" className="button secondary full" onClick={handleLogout}>Logout</button>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <button type="button" className="menu-toggle" onClick={() => setOpen(!open)}>☰</button>
+          <div className="topbar-title">CampusHelp</div>
+        </header>
+        <div className="content-wrap">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+function TicketTable({ tickets, linkPrefix, emptyText = 'No tickets found.' }) {
+  const navigate = useNavigate();
+
+  if (!tickets || !tickets.length) {
+    return (
+      <div className="empty">
+        <div>⌁</div>
+        <h3>{emptyText}</h3>
+      </div>
+    );
+  }
+
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Ticket</th>
+            <th>Subject</th>
+            <th>Category</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tickets.map((ticket) => {
+            const id = ticket.ticket_id || ticket.id;
+            return (
+              <tr key={id} onClick={() => navigate(`${linkPrefix}/${id}`)} style={{ cursor: 'pointer' }}>
+                <td>{id}</td>
+                <td>{ticket.subject}</td>
+                <td>{ticket.category}</td>
+                <td><StatusBadge value={ticket.status || 'Open'} /></td>
+                <td><PriorityBadge value={ticket.priority || 'Medium'} /></td>
+                <td>{formatDate(ticket.created_at)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function suggestTicket(subject = '', description = '') {
+  const text = `${subject} ${description}`.toLowerCase();
+
+  let category = 'Other';
+  if (/(password|login|access|credential|reset)/.test(text)) category = 'Password Reset';
+  if (/(lock|locked|account)/.test(text)) category = 'Locked Account';
+  if (/(vpn|network|internet|wifi|connection|latency|offline)/.test(text)) category = 'Network/Internet';
+  if (/(email|mail|outlook)/.test(text)) category = 'Email Issue';
+  if (/(printer|scanner|peripheral)/.test(text)) category = 'Printer/Peripheral';
+  if (/(portal|system|website|site|portal error)/.test(text)) category = 'System/Portal Issue';
+  if (/(software|application|app|office|zoom)/.test(text)) category = 'Software/Application';
+  if (/(computer|laptop|device|hardware|desktop|battery)/.test(text)) category = 'Computer/Laptop Issue';
+  if (/(permission|access.*role|role.*access)/.test(text)) category = 'Access Permission';
+  if (/(account.*access|unable.*login)/.test(text)) category = 'Account and Access';
+
+  let priority = 'Medium';
+  if (/(critical|urgent|major outage|cannot.*login|campus.*down|network.*down)/.test(text)) {
+    priority = 'Urgent';
+  } else if (/(password|login|locked|portal|network|email|printer|system)/.test(text)) {
+    priority = 'High';
+  } else if (/(info|question|minor|check|update)/.test(text)) {
+    priority = 'Low';
+  }
+
+  return { suggestedCategory: category, suggestedPriority: priority };
+}
+
+function Dashboard({ role }) {
+  const { user } = useAuth();
+  const [tickets, setTickets] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [ticketsData, notificationsData] = await Promise.all([
+          apiFetch('/api/tickets'),
+          apiFetch('/api/notifications')
+        ]);
+
+        setTickets(ticketsData.tickets || []);
+        setNotifications(notificationsData.notifications || []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadData();
+  }, [role]);
+
+  if (loading) {
+    return <div className="empty"><h3>Loading dashboard...</h3></div>;
+  }
+
+  const cards = [
+    { label: 'Total Tickets', value: tickets.length, tone: 'blue' },
+    { label: 'Open', value: tickets.filter((t) => t.status === 'Open').length, tone: 'green' },
+    { label: 'In Progress', value: tickets.filter((t) => t.status === 'In Progress').length, tone: 'amber' },
+    { label: 'Resolved', value: tickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length, tone: 'cyan' }
+  ];
+
+  const basePath = role === 'User' ? '/user/tickets' : role === 'IT Staff' ? '/staff/tickets' : '/admin/tickets';
+
+  return (
+    <>
+      <PageHead eyebrow="Overview" title={role === 'User' ? 'My Dashboard' : role === 'IT Staff' ? 'IT Staff Dashboard' : 'Admin Dashboard'} description={`Welcome, ${user?.full_name || 'User'}.`} />
+
+      <div className="stat-grid">
+        {cards.map((card) => (
+          <div className="stat-card" key={card.label}>
+            <div className={`stat-icon ${card.tone}`}><Icon>{card.label[0]}</Icon></div>
+            <div>
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="two-col">
+        <section className="panel-card">
+          <div className="panel-head"><h3>Recent Tickets</h3></div>
+          <TicketTable tickets={tickets.slice(0, 5)} linkPrefix={basePath} emptyText="No tickets yet." />
+        </section>
+
+        <section className="panel-card">
+          <div className="panel-head"><h3>Notifications</h3></div>
+          {notifications.length ? (
+            <ul className="notification-list">
+              {notifications.slice(0, 5).map((item) => (
+                <li key={item.notification_id}><span>{item.message}</span></li>
+              ))}
+            </ul>
+          ) : (
+            <div className="empty"><h3>No notifications.</h3></div>
+          )}
+        </section>
+      </div>
+    </>
+  );
+}
+
+function TicketList({ role }) {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadTickets() {
+      try {
+        const data = await apiFetch('/api/tickets');
+        setTickets(data.tickets || []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadTickets();
+  }, [role]);
+
+  if (loading) {
+    return <div className="empty"><h3>Loading tickets...</h3></div>;
+  }
+
+  const basePath = role === 'User' ? '/user/tickets' : role === 'IT Staff' ? '/staff/tickets' : '/admin/tickets';
+
+  return (
+    <>
+      <PageHead eyebrow="TICKETS" title="Ticket List" description="Review and monitor submitted requests." action={<Link className="button" to={role === 'User' ? '/user/create-ticket' : '#'}>New Ticket</Link>} />
+      <TicketTable tickets={tickets} linkPrefix={basePath} emptyText="No tickets found." />
+    </>
+  );
+}
+
+function CreateTicket() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState({
+    subject: '',
+    description: '',
+    category: 'Network/Internet',
+    priority: 'Medium'
+  });
+  const [error, setError] = useState('');
+
+  const suggestion = useMemo(() => suggestTicket(form.subject, form.description), [form.subject, form.description]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+
+    if (form.priority === 'Urgent' && suggestion.suggestedPriority !== 'Urgent') {
+      const confirmed = window.confirm(
+        'Confirm Urgent Priority\n\nUrgent priority should only be used for issues that significantly prevent academic or university operations or affect critical services. Incorrectly marking a non-urgent concern as urgent may delay the handling of genuinely critical requests.'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      await apiFetch('/api/tickets', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...form,
+          suggested_category: suggestion.suggestedCategory,
+          suggested_priority: suggestion.suggestedPriority,
+          priority_manually_escalated: form.priority === 'Urgent' && suggestion.suggestedPriority !== 'Urgent'
+        })
+      });
+
+      navigate('/user/dashboard');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="NEW REQUEST" title="Create a ticket" description="Tell us what you need help with and our IT team will get back to you." />
+      <form className="form-card" onSubmit={submit}>
+        {error && <div className="alert error">{error}</div>}
+
+        <div className="field-grid two-up">
+          <label>
+            <span>Subject</span>
+            <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Brief description of the issue" required />
+          </label>
+
+          <label>
+            <span>Category</span>
+            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {CATEGORIES.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label>
+          <span>Problem Description</span>
+          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows="6" placeholder="Describe the issue in detail" required />
+        </label>
+
+        <div className="field-grid two-up">
+          <label>
+            <span>Priority</span>
+            <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="suggestion-box">
+            <div><strong>Suggested Category:</strong> {suggestion.suggestedCategory}</div>
+            <div><strong>Suggested Priority:</strong> {suggestion.suggestedPriority}</div>
+          </div>
+        </div>
+
+        <div className="action-row">
+          <button type="submit" className="button">Submit Ticket</button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function TicketDetailPage() {
+  const { ticketId } = useParams();
+  const { user } = useAuth();
+  const [ticket, setTicket] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [reply, setReply] = useState('');
+  const [status, setStatus] = useState('Open');
+  const [error, setError] = useState('');
+
+  async function loadTicket() {
+    try {
+      const data = await apiFetch(`/api/tickets/${ticketId}`);
+      setTicket(data.ticket);
+      setMessages(data.messages || []);
+      setStatus(data.ticket.status || 'Open');
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    loadTicket();
+  }, [ticketId]);
+
+  async function handleStatusChange(nextStatus) {
+    try {
+      await apiFetch(`/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: nextStatus })
+      });
+      setStatus(nextStatus);
+      await loadTicket();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function sendReply() {
+    if (!reply.trim()) return;
+
+    try {
+      await apiFetch(`/api/tickets/${ticketId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ message: reply })
+      });
+      setReply('');
+      await loadTicket();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (!ticket) {
+    return <div className="empty"><h3>Loading ticket...</h3></div>;
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">#{ticket.ticket_id}</span>} action={<Link className="button secondary" to={getDashboardPath(user.role)}>Back</Link>} />
+      {error && <div className="alert error">{error}</div>}
+
+      <section className="panel-card">
+        <div className="field-grid two-up">
+          <div>
+            <p><strong>Category:</strong> {ticket.category}</p>
+            <p><strong>Priority:</strong> <PriorityBadge value={ticket.priority} /></p>
+            <p><strong>Suggested Category:</strong> {ticket.suggested_category || 'Not provided'}</p>
+            <p><strong>Suggested Priority:</strong> {ticket.suggested_priority || 'Not provided'}</p>
+          </div>
+          <div>
+            {['IT Staff', 'Administrator'].includes(user.role) && (
+              <label>
+                <span>Status</span>
+                <select value={status} onChange={(e) => handleStatusChange(e.target.value)}>
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <p><strong>Requester:</strong> {ticket.requester_name || 'Unknown'}</p>
+            <p><strong>Assigned:</strong> {ticket.assigned_staff_name || 'Unassigned'}</p>
+          </div>
+        </div>
+
+        <div className="ticket-description">
+          <h3>Description</h3>
+          <p>{ticket.description}</p>
+        </div>
+      </section>
+
+      <section className="panel-card">
+        <div className="panel-head"><h3>Conversation</h3></div>
+        {messages.length ? (
+          <div className="message-list">
+            {messages.map((item) => (
+              <div key={item.message_id} className="message-item">
+                <div className="message-meta">
+                  <strong>{item.sender_name}</strong>
+                  <span>{formatDate(item.sent_at)}</span>
+                </div>
+                <p>{item.message}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty"><h3>No messages yet.</h3></div>
+        )}
+
+        <div className="reply-box">
+          <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows="4" placeholder="Write a response..." />
+          <button type="button" className="button" onClick={sendReply}>Send Reply</button>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function NotificationsPage() {
+  const [notes, setNotes] = useState([]);
+
+  useEffect(() => {
+    async function loadNotifications() {
+      try {
+        const data = await apiFetch('/api/notifications');
+        setNotes(data.notifications || []);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    loadNotifications();
+  }, []);
+
+  async function markRead(notificationId) {
+    try {
+      await apiFetch(`/api/notifications/${notificationId}/read`, { method: 'PATCH' });
+      setNotes((current) => current.map((item) => item.notification_id === notificationId ? { ...item, is_read: true } : item));
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="INBOX" title="Notifications" description="Track updates sent by the CampusHelp system." />
+      {notes.length ? (
+        <div className="notification-stack">
+          {notes.map((item) => (
+            <div key={item.notification_id} className={`notification-item ${item.is_read ? 'read' : 'unread'}`}>
+              <div>
+                <strong>{item.message}</strong>
+                <small>{formatDate(item.created_at)}</small>
+              </div>
+              {!item.is_read && <button type="button" className="button secondary" onClick={() => markRead(item.notification_id)}>Mark Read</button>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty"><h3>No notifications yet.</h3></div>
+      )}
+    </>
+  );
+}
+
+function ProfilePage() {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <div className="empty"><h3>No profile data.</h3></div>;
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account details." />
+      <section className="profile-card">
+        <div className="profile-row"><strong>Full Name:</strong> <span>{user.full_name}</span></div>
+        <div className="profile-row"><strong>Email:</strong> <span>{user.email}</span></div>
+        <div className="profile-row"><strong>Role:</strong> <span>{user.role}</span></div>
+        <div className="profile-row"><strong>Account Type:</strong> <span>{user.account_type}</span></div>
+        <div className="profile-row"><strong>Department:</strong> <span>{user.department || 'Not specified'}</span></div>
+        {user.account_type === 'Student' && user.student_number && (
+          <div className="profile-row"><strong>Student Number:</strong> <span>{user.student_number}</span></div>
+        )}
+        {user.account_type === 'Faculty' && user.employee_id && (
+          <div className="profile-row"><strong>Employee ID:</strong> <span>{user.employee_id}</span></div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function AdminAnalyticsPage() {
+  const [analytics, setAnalytics] = useState(null);
+
+  useEffect(() => {
+    async function loadAnalytics() {
+      try {
+        const data = await apiFetch('/api/admin/analytics');
+        setAnalytics(data);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    loadAnalytics();
+  }, []);
+
+  if (!analytics) {
+    return <div className="empty"><h3>Loading analytics...</h3></div>;
+  }
+
+  return (
+    <>
+      <PageHead eyebrow="ADMINISTRATION" title="Analytics" description="PostgreSQL-backed CampusHelp system overview." />
+      <div className="stat-grid">
+        <div className="stat-card"><div className="stat-icon blue"><Icon>◫</Icon></div><div><span>Total Tickets</span><strong>{analytics.totals.total}</strong></div></div>
+        <div className="stat-card"><div className="stat-icon green"><Icon>⌂</Icon></div><div><span>Open</span><strong>{analytics.totals.open}</strong></div></div>
+        <div className="stat-card"><div className="stat-icon amber"><Icon>◌</Icon></div><div><span>In Progress</span><strong>{analytics.totals.inProgress}</strong></div></div>
+        <div className="stat-card"><div className="stat-icon cyan"><Icon>✓</Icon></div><div><span>Resolved</span><strong>{analytics.totals.resolved}</strong></div></div>
+      </div>
+
+      <div className="two-col">
+        <section className="panel-card">
+          <div className="panel-head"><h3>Tickets by Category</h3></div>
+          <ul className="bullet-list">
+            {(analytics.byCategory || []).map((item) => (
+              <li key={item.category}><span>{item.category}</span><strong>{item.count}</strong></li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="panel-card">
+          <div className="panel-head"><h3>Tickets by Status</h3></div>
+          <ul className="bullet-list">
+            {(analytics.byStatus || []).map((item) => (
+              <li key={item.status}><span>{item.status}</span><strong>{item.count}</strong></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function Login() {
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+
+    try {
+      const data = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(form)
+      });
+
+      setUser(data.user);
+      navigate(getDashboardPath(data.user.role));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-panel">
+        <div className="login-art">
+          <div className="brand logo-block">
+            <span className="logo"><Icon>⌁</Icon></span>
+            <div>
+              <b>CampusHelp</b>
+              <small>Department of Information Technology</small>
+            </div>
+          </div>
+          <h1>Need help with your university account or device?</h1>
+          <p>Submit and track requests with the CampusHelp help desk.</p>
+        </div>
+
+        <div className="login-card">
+          <div className="eyebrow">WELCOME BACK</div>
+          <h2>Sign In</h2>
+          <form onSubmit={submit}>
+            {error && <div className="alert error">{error}</div>}
+            <label>
+              <span>Email</span>
+              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@mymail.mapua.edu.ph" required />
+            </label>
+            <label>
+              <span>Password</span>
+              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Enter your password" required />
+            </label>
+            <button type="submit" className="button full">Login</button>
+            <div className="signup-row">
+              <Link to="/register">Create an account</Link>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Register() {
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
+  const [form, setForm] = useState({
+    full_name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    accountType: 'Student',
+    studentNumber: '',
+    employeeId: '',
+    department: '',
+    ecm: null
+  });
+  const [error, setError] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+
+    if (form.password !== form.confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
 
-    cb(new Error('Only PDF, PNG, and JPG files are allowed for ECM documents.'));
-  }
-});
-
-app.use('/uploads', express.static(uploadDir));
-
-async function requireAuth(req, res, next) {
-  if (!req.session?.userId) {
-    return res.status(401).json({ message: 'Authentication required.' });
-  }
-
-  try {
-    const result = await pool.query('SELECT * FROM users WHERE user_id = $1', [req.session.userId]);
-    if (!result.rows[0]) {
-      req.session.destroy(() => {});
-      return res.status(401).json({ message: 'Session invalid or expired.' });
+    if (!form.email.endsWith('@mymail.mapua.edu.ph')) {
+      setError('Mapúa email is required. Use your @mymail.mapua.edu.ph address.');
+      return;
     }
 
-    req.user = result.rows[0];
-    next();
-  } catch (error) {
-    console.error('Auth lookup failed:', error);
-    return res.status(500).json({ message: 'Unable to verify session.' });
-  }
-}
-
-function authorizeRole(req, res, allowedRoles) {
-  if (!req.user) {
-    return false;
-  }
-
-  if (!allowedRoles.includes(req.user.role)) {
-    return false;
-  }
-
-  return true;
-}
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, message: 'CampusHelp API is running.' });
-});
-
-app.post('/api/auth/register', upload.single('ecm'), async (req, res) => {
-  try {
-    const payload = req.body;
-    const fullName = String(payload.full_name || payload.fullName || '').trim();
-    const email = normalizeEmail(payload.email || payload.emailAddress || '');
-    const password = String(payload.password || '');
-    const confirmPassword = String(payload.confirmPassword || payload.confirm_password || '');
-    const accountType = String(payload.account_type || payload.accountType || 'Student');
-    const studentNumber = String(payload.student_number || payload.studentNumber || '').trim();
-    const employeeId = String(payload.employee_id || payload.employeeId || '').trim();
-    const department = String(payload.department || '').trim();
-
-    if (!fullName) {
-      return res.status(400).json({ message: 'Full name is required.' });
+    if (form.accountType === 'Student' && !form.ecm) {
+      setError('Student ECM upload is required.');
+      return;
     }
 
-    if (!email || !email.includes('@')) {
-      return res.status(400).json({ message: 'A valid email is required.' });
-    }
+    try {
+      const data = new FormData();
+      data.append('full_name', form.full_name);
+      data.append('email', form.email);
+      data.append('password', form.password);
+      data.append('confirmPassword', form.confirmPassword);
+      data.append('account_type', form.accountType);
+      data.append('student_number', form.studentNumber);
+      data.append('employee_id', form.employeeId);
+      data.append('department', form.department);
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
-    }
-
-    if (password !== confirmPassword) {
-      return res.status(400).json({ message: 'Passwords do not match.' });
-    }
-
-    if (!['Student', 'Faculty'].includes(accountType)) {
-      return res.status(400).json({ message: 'Invalid account type.' });
-    }
-
-    if (!isMapuaEmail(email, accountType)) {
-      return res.status(400).json({ message: 'Mapúa email is required. Use your @mymail.mapua.edu.ph address.' });
-    }
-
-    const existingUser = await pool.query('SELECT user_id FROM users WHERE email = $1', [email]);
-    if (existingUser.rowCount > 0) {
-      return res.status(409).json({ message: 'An account with that email already exists.' });
-    }
-
-    if (accountType === 'Student') {
-      if (!studentNumber) {
-        return res.status(400).json({ message: 'Student number is required.' });
+      if (form.ecm) {
+        data.append('ecm', form.ecm);
       }
 
-      if (!req.file) {
-        return res.status(400).json({ message: 'Student ECM upload is required.' });
+      const result = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        body: data
+      });
+
+      setUser(result.user);
+      navigate(getDashboardPath(result.user.role));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-panel single-column">
+        <div className="login-card wide-card">
+          <div className="eyebrow">CREATE ACCOUNT</div>
+          <h2>Sign Up</h2>
+          <form onSubmit={submit}>
+            {error && <div className="alert error">{error}</div>}
+
+            <div className="field-grid two-up">
+              <label>
+                <span>Full Name</span>
+                <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required />
+              </label>
+
+              <label>
+                <span>Account Type</span>
+                <select value={form.accountType} onChange={(e) => setForm({ ...form, accountType: e.target.value })}>
+                  <option value="Student">Student</option>
+                  <option value="Faculty">Faculty</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="field-grid two-up">
+              <label>
+                <span>Email</span>
+                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@mymail.mapua.edu.ph" required />
+              </label>
+
+              <label>
+                <span>Department</span>
+                <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="Department or unit" />
+              </label>
+            </div>
+
+            <div className="field-grid two-up">
+              <label>
+                <span>Password</span>
+                <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+              </label>
+
+              <label>
+                <span>Confirm Password</span>
+                <input type="password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} required />
+              </label>
+            </div>
+
+            {form.accountType === 'Student' ? (
+              <>
+                <label>
+                  <span>Student Number</span>
+                  <input value={form.studentNumber} onChange={(e) => setForm({ ...form, studentNumber: e.target.value })} required />
+                </label>
+
+                <label>
+                  <span>ECM Upload (required)</span>
+                  <input type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => setForm({ ...form, ecm: e.target.files[0] })} required />
+                </label>
+              </>
+            ) : (
+              <label>
+                <span>Employee ID</span>
+                <input value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
+              </label>
+            )}
+
+            <div className="action-row">
+              <button type="submit" className="button">Create Account</button>
+            </div>
+            <div className="signup-row">
+              <Link to="/login">Back to login</Link>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppRoutes() {
+  const location = useLocation();
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div className="page-shell"><div className="empty"><h3>Loading CampusHelp...</h3></div></div>;
+  }
+
+  if (!user && location.pathname !== '/login' && location.pathname !== '/register') {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user && (location.pathname === '/login' || location.pathname === '/register')) {
+    return <Navigate to={getDashboardPath(user.role)} replace />;
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to={user ? getDashboardPath(user.role) : '/login'} replace />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+
+      <Route path="/user/dashboard" element={<Protected allowedRoles={['User']}><Shell role="User"><Dashboard role="User" /></Shell></Protected>} />
+      <Route path="/user/tickets" element={<Protected allowedRoles={['User']}><Shell role="User"><TicketList role="User" /></Shell></Protected>} />
+      <Route path="/user/tickets/:ticketId" element={<Protected allowedRoles={['User']}><Shell role="User"><TicketDetailPage /></Shell></Protected>} />
+      <Route path="/user/create-ticket" element={<Protected allowedRoles={['User']}><Shell role="User"><CreateTicket /></Shell></Protected>} />
+      <Route path="/user/notifications" element={<Protected allowedRoles={['User']}><Shell role="User"><NotificationsPage /></Shell></Protected>} />
+      <Route path="/user/profile" element={<Protected allowedRoles={['User']}><Shell role="User"><ProfilePage /></Shell></Protected>} />
+
+      <Route path="/staff/dashboard" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><Dashboard role="IT Staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><TicketList role="IT Staff" /></Shell></Protected>} />
+      <Route path="/staff/tickets/:ticketId" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><TicketDetailPage /></Shell></Protected>} />
+      <Route path="/staff/notifications" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><NotificationsPage /></Shell></Protected>} />
+      <Route path="/staff/profile" element={<Protected allowedRoles={['IT Staff']}><Shell role="IT Staff"><ProfilePage /></Shell></Protected>} />
+
+      <Route path="/admin/dashboard" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><Dashboard role="Administrator" /></Shell></Protected>} />
+      <Route path="/admin/tickets" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketList role="Administrator" /></Shell></Protected>} />
+      <Route path="/admin/tickets/:ticketId" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><TicketDetailPage /></Shell></Protected>} />
+      <Route path="/admin/analytics" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><AdminAnalyticsPage /></Shell></Protected>} />
+      <Route path="/admin/notifications" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><NotificationsPage /></Shell></Protected>} />
+      <Route path="/admin/profile" element={<Protected allowedRoles={['Administrator']}><Shell role="Administrator"><ProfilePage /></Shell></Protected>} />
+    </Routes>
+  );
+}
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadSession() {
+      try {
+        const data = await apiFetch('/api/auth/me');
+        setUser(data.user || null);
+      } catch (error) {
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
     }
 
-    if (accountType === 'Faculty' && !employeeId && department) {
-      // employee id is optional for now, but if a faculty member enters one it is kept.
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const storedEcmPath = req.file ? `/uploads/${req.file.filename}` : null;
-
-    const result = await pool.query(
-      `
-        INSERT INTO users (
-          full_name,
-          email,
-          password_hash,
-          role,
-          account_type,
-          student_number,
-          employee_id,
-          department,
-          ecm_file_path
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING *
-      `,
-      [
-        fullName,
-        email,
-        passwordHash,
-        'User',
-        accountType,
-        accountType === 'Student' ? studentNumber : null,
-        accountType === 'Faculty' ? employeeId || null : null,
-        department || null,
-        storedEcmPath
-      ]
-    );
-
-    const user = sanitizeUser(result.rows[0]);
-    req.session.userId = user.user_id;
-    await logAudit(user.user_id, null, 'Registration');
-
-    return res.status(201).json({
-      message: 'Registration successful.',
-      user
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-
-    if (error.message && error.message.includes('Only PDF')) {
-      return res.status(400).json({ message: error.message });
-    }
-
-    return res.status(500).json({ message: 'Registration failed. Please try again.' });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body.email || req.body.emailAddress || '');
-    const password = String(req.body.password || '');
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
-    }
-
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    const user = result.rows[0];
-
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
-    }
-
-    req.session.userId = user.user_id;
-    await logAudit(user.user_id, null, 'Login');
-
-    return res.json({
-      message: 'Login successful.',
-      user: sanitizeUser(user)
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ message: 'Login failed. Please try again.' });
-  }
-});
-
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-  req.session.destroy((error) => {
-    if (error) {
-      return res.status(500).json({ message: 'Unable to log out.' });
-    }
-
-    return res.json({ message: 'Logged out.' });
-  });
-});
-
-app.get('/api/auth/me', async (req, res) => {
-  if (!req.session?.userId) {
-    return res.status(401).json({ message: 'Not authenticated.' });
-  }
-
-  try {
-    const result = await pool.query('SELECT * FROM users WHERE user_id = $1', [req.session.userId]);
-    const user = result.rows[0];
-
-    if (!user) {
-      req.session.destroy(() => {});
-      return res.status(401).json({ message: 'Session invalid or expired.' });
-    }
-
-    return res.json({ user: sanitizeUser(user) });
-  } catch (error) {
-    console.error('Auth me error:', error);
-    return res.status(500).json({ message: 'Unable to load session.' });
-  }
-});
-
-app.get('/api/tickets', requireAuth, async (req, res) => {
-  try {
-    const role = req.user.role;
-
-    let query = `
-      SELECT t.*, 
-             requester.full_name AS requester_name,
-             assigned.full_name AS assigned_staff_name,
-             requester.email AS requester_email
-      FROM tickets t
-      LEFT JOIN users requester ON requester.user_id = t.requester_id
-      LEFT JOIN users assigned ON assigned.user_id = t.assigned_staff_id
-    `;
-
-    const params = [];
-
-    if (role === 'User') {
-      query += ' WHERE t.requester_id = $1';
-      params.push(req.user.user_id);
-    }
-
-    query += ' ORDER BY t.created_at DESC';
-
-    const result = await pool.query(query, params);
-    return res.json({ tickets: result.rows });
-  } catch (error) {
-    console.error('List tickets error:', error);
-    return res.status(500).json({ message: 'Unable to load tickets.' });
-  }
-});
-
-app.get('/api/tickets/:id', requireAuth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-        SELECT t.*, 
-               requester.full_name AS requester_name,
-               assigned.full_name AS assigned_staff_name,
-               requester.email AS requester_email
-        FROM tickets t
-        LEFT JOIN users requester ON requester.user_id = t.requester_id
-        LEFT JOIN users assigned ON assigned.user_id = t.assigned_staff_id
-        WHERE t.ticket_id = $1
-      `,
-      [req.params.id]
-    );
-
-    if (!result.rows[0]) {
-      return res.status(404).json({ message: 'Ticket not found.' });
-    }
-
-    const ticket = result.rows[0];
-    const authorized =
-      req.user.role !== 'User' || ticket.requester_id === req.user.user_id;
-
-    if (!authorized) {
-      return res.status(403).json({ message: 'You are not authorized to view this ticket.' });
-    }
-
-    const messagesResult = await pool.query(
-      `
-        SELECT tm.*, u.full_name AS sender_name, u.email AS sender_email
-        FROM ticket_messages tm
-        LEFT JOIN users u ON u.user_id = tm.sender_id
-        WHERE tm.ticket_id = $1
-        ORDER BY tm.sent_at ASC
-      `,
-      [req.params.id]
-    );
-
-    return res.json({ ticket, messages: messagesResult.rows });
-  } catch (error) {
-    console.error('Fetch ticket error:', error);
-    return res.status(500).json({ message: 'Unable to load ticket details.' });
-  }
-});
-
-app.post('/api/tickets', requireAuth, async (req, res) => {
-  try {
-    const ticket = req.body || {};
-    const subject = String(ticket.subject || '').trim();
-    const description = String(ticket.description || '').trim();
-    const category = String(ticket.category || 'Other').trim();
-    const priority = String(ticket.priority || 'Medium');
-    const suggestedCategory = String(ticket.suggested_category || '').trim();
-    const suggestedPriority = String(ticket.suggested_priority || '').trim();
-    const priorityManuallyEscalated = Boolean(ticket.priority_manually_escalated);
-
-    if (!subject || !description) {
-      return res.status(400).json({ message: 'Subject and description are required.' });
-    }
-
-    const result = await pool.query(
-      `
-        INSERT INTO tickets (
-          requester_id,
-          subject,
-          description,
-          category,
-          suggested_category,
-          priority,
-          suggested_priority,
-          priority_manually_escalated,
-          status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Open')
-        RETURNING *
-      `,
-      [
-        req.user.user_id,
-        subject,
-        description,
-        category,
-        suggestedCategory || null,
-        priority,
-        suggestedPriority || null,
-        priorityManuallyEscalated
-      ]
-    );
-
-    const createdTicket = result.rows[0];
-    const staffUsers = await pool.query(`SELECT user_id FROM users WHERE role IN ('IT Staff', 'Administrator')`);
-
-    for (const staffUser of staffUsers.rows) {
-      await createNotification(staffUser.user_id, createdTicket.ticket_id, `New ticket: ${subject}`);
-    }
-
-    await logAudit(req.user.user_id, createdTicket.ticket_id, 'Ticket creation');
-
-    return res.status(201).json({
-      message: 'Ticket submitted successfully.',
-      ticket: createdTicket
-    });
-  } catch (error) {
-    console.error('Create ticket error:', error);
-    return res.status(500).json({ message: 'Ticket submission failed.' });
-  }
-});
-
-app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
-  try {
-    const ticketId = Number(req.params.id);
-    const existing = await pool.query('SELECT * FROM tickets WHERE ticket_id = $1', [ticketId]);
-
-    if (!existing.rows[0]) {
-      return res.status(404).json({ message: 'Ticket not found.' });
-    }
-
-    const ticket = existing.rows[0];
-    const isAllowedAdminStaff = ['IT Staff', 'Administrator'].includes(req.user.role);
-    const isRequester = ticket.requester_id === req.user.user_id;
-
-    if (!isAllowedAdminStaff && !isRequester) {
-      return res.status(403).json({ message: 'You do not have permission to update this ticket.' });
-    }
-
-    const status = String(req.body.status || ticket.status);
-    const priority = String(req.body.priority || ticket.priority);
-    const category = String(req.body.category || ticket.category);
-    const assignedStaffId = req.body.assigned_staff_id !== undefined ? Number(req.body.assigned_staff_id) : ticket.assigned_staff_id;
-
-    const updateResult = await pool.query(
-      `
-        UPDATE tickets
-        SET status = $1,
-            priority = $2,
-            category = $3,
-            assigned_staff_id = $4,
-            updated_at = NOW(),
-            resolved_at = CASE WHEN $1 = 'Resolved' OR $1 = 'Closed' THEN NOW() ELSE NULL END
-        WHERE ticket_id = $5
-        RETURNING *
-      `,
-      [status, priority, category, assignedStaffId, ticketId]
-    );
-
-    const updatedTicket = updateResult.rows[0];
-
-    if (req.body.message && String(req.body.message).trim()) {
-      await pool.query(
-        `INSERT INTO ticket_messages (ticket_id, sender_id, message) VALUES ($1, $2, $3)`,
-        [ticketId, req.user.user_id, String(req.body.message).trim()]
-      );
-
-      await createNotification(ticket.requester_id, ticketId, `New response on ticket #${ticketId}`);
-      await logAudit(req.user.user_id, ticketId, 'IT Staff response');
-    }
-
-    if (ticket.requester_id !== req.user.user_id) {
-      await createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`);
-    }
-
-    await logAudit(req.user.user_id, ticketId, 'Ticket update');
-
-    return res.json({ message: 'Ticket updated successfully.', ticket: updatedTicket });
-  } catch (error) {
-    console.error('Ticket patch error:', error);
-    return res.status(500).json({ message: 'The ticket could not be updated.' });
-  }
-});
-
-app.get('/api/tickets/:id/messages', requireAuth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-        SELECT tm.*, u.full_name AS sender_name, u.email AS sender_email
-        FROM ticket_messages tm
-        LEFT JOIN users u ON u.user_id = tm.sender_id
-        WHERE tm.ticket_id = $1
-        ORDER BY tm.sent_at ASC
-      `,
-      [req.params.id]
-    );
-
-    return res.json({ messages: result.rows });
-  } catch (error) {
-    console.error('Ticket messages error:', error);
-    return res.status(500).json({ message: 'Unable to load conversation.' });
-  }
-});
-
-app.post('/api/tickets/:id/messages', requireAuth, async (req, res) => {
-  try {
-    const message = String(req.body.message || '').trim();
-    if (!message) {
-      return res.status(400).json({ message: 'Message content is required.' });
-    }
-
-    const ticketCheck = await pool.query('SELECT * FROM tickets WHERE ticket_id = $1', [req.params.id]);
-    if (!ticketCheck.rows[0]) {
-      return res.status(404).json({ message: 'Ticket not found.' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO ticket_messages (ticket_id, sender_id, message) VALUES ($1, $2, $3) RETURNING *`,
-      [req.params.id, req.user.user_id, message]
-    );
-
-    const otherUserId = ticketCheck.rows[0].requester_id === req.user.user_id
-      ? ticketCheck.rows[0].assigned_staff_id
-      : ticketCheck.rows[0].requester_id;
-
-    if (otherUserId) {
-      await createNotification(otherUserId, Number(req.params.id), 'A new ticket message was posted.');
-    }
-
-    await logAudit(req.user.user_id, Number(req.params.id), 'Ticket message sent');
-    return res.status(201).json({ message: result.rows[0] });
-  } catch (error) {
-    console.error('Message create error:', error);
-    return res.status(500).json({ message: 'Unable to send message.' });
-  }
-});
-
-app.get('/api/notifications', requireAuth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC`,
-      [req.user.user_id]
-    );
-
-    return res.json({ notifications: result.rows });
-  } catch (error) {
-    console.error('Load notifications error:', error);
-    return res.status(500).json({ message: 'Unable to load notifications.' });
-  }
-});
-
-app.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `UPDATE notifications SET is_read = TRUE WHERE notification_id = $1 AND user_id = $2 RETURNING *`,
-      [req.params.id, req.user.user_id]
-    );
-
-    if (!result.rows[0]) {
-      return res.status(404).json({ message: 'Notification not found.' });
-    }
-
-    return res.json({ notification: result.rows[0] });
-  } catch (error) {
-    console.error('Mark notification read error:', error);
-    return res.status(500).json({ message: 'Unable to update notification.' });
-  }
-});
-
-app.get('/api/admin/analytics', requireAuth, async (req, res) => {
-  try {
-    if (!['IT Staff', 'Administrator'].includes(req.user.role)) {
-      return res.status(403).json({ message: 'Not authorized.' });
-    }
-
-    const totalResult = await pool.query('SELECT COUNT(*) AS count FROM tickets');
-    const openResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'Open'");
-    const inProgressResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'In Progress'");
-    const resolvedResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'Resolved' OR status = 'Closed'");
-
-    const categoryResult = await pool.query(
-      `SELECT category, COUNT(*) AS count FROM tickets GROUP BY category ORDER BY count DESC LIMIT 8`
-    );
-
-    const statusResult = await pool.query(
-      `SELECT status, COUNT(*) AS count FROM tickets GROUP BY status ORDER BY count DESC`
-    );
-
-    const timeResult = await pool.query(
-      `SELECT DATE(created_at) AS date, COUNT(*) AS count FROM tickets GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 10`
-    );
-
-    return res.json({
-      totals: {
-        total: Number(totalResult.rows[0]?.count || 0),
-        open: Number(openResult.rows[0]?.count || 0),
-        inProgress: Number(inProgressResult.rows[0]?.count || 0),
-        resolved: Number(resolvedResult.rows[0]?.count || 0)
-      },
-      byCategory: categoryResult.rows,
-      byStatus: statusResult.rows,
-      overTime: timeResult.rows
-    });
-  } catch (error) {
-    console.error('Admin analytics error:', error);
-    return res.status(500).json({ message: 'Unable to load analytics.' });
-  }
-});
-
-app.use((error, _req, res, _next) => {
-  console.error('Unhandled server error:', error);
-  res.status(500).json({ message: 'Unexpected server error.' });
-});
-
-async function startServer() {
-  try {
-    await ensureSchema();
-    await seedDefaultAccounts();
-    app.listen(port, () => {
-      console.log(`CampusHelp API running on http://localhost:${port}`);
-    });
-  } catch (error) {
-    console.error('Failed to initialize CampusHelp server:', error);
-    process.exit(1);
-  }
+    loadSession();
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, setUser, loading }}>
+      <AppRoutes />
+    </AuthContext.Provider>
+  );
 }
-
-startServer();
