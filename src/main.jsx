@@ -734,13 +734,12 @@ function Login() {
 
   return (
     <div className="login-page">
+      <div className="login-art">
+        <div className="brand logo-block"><span className="logo"><Icon>⌁</Icon></span><div><b>CampusHelp</b><small>Department of Information Technology</small></div></div>
+        <h1>Need help with your university account or device?</h1>
+        <p>Submit and track requests with the CampusHelp help desk.</p>
+      </div>
       <div className="login-panel">
-        <div className="login-art">
-          <div className="brand logo-block"><span className="logo"><Icon>⌁</Icon></span><div><b>CampusHelp</b><small>Department of Information Technology</small></div></div>
-          <h1>Need help with your university account or device?</h1>
-          <p>Submit and track requests with the CampusHelp help desk.</p>
-        </div>
-
         <div className="login-card">
           <div className="eyebrow">WELCOME BACK</div>
           <h2>Sign In</h2>
