@@ -1,51 +1,638 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import express from 'express';
+import session from 'express-session';
+import pgSession from 'connect-pg-simple';
+import cors from 'cors';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
-const KEY = 'campushelp-data-v1';
-const users = [
-  { username: 'user', password: 'user123', role: 'user', name: 'Miguel Mendoza', email: 'miguel.mendoza@university.edu', department: 'Computer Science', id: '2024-00123' },
-  { username: 'itstaff', password: 'staff123', role: 'staff', name: 'Jordan Lee', email: 'jordan.lee@university.edu', department: 'Information Technology', id: 'IT-0042' },
-  { username: 'admin', password: 'admin123', role: 'admin', name: 'Dr. Alicia Reyes', email: 'alicia.reyes@university.edu', department: 'Information Technology', id: 'ADM-0001' }
-];
-const staff = [{ name: 'Jordan Lee', username: 'itstaff' }, { name: 'Priya Shah', username: 'staff2' }, { name: 'Marcus Chen', username: 'staff3' }];
-const categories = ['Account & Access','Password Reset','Locked Account','Computer/Laptop Issue','Network/Internet','Email Issue','Software/Application','Printer/Peripheral','System/Portal Issue','Access Permission','Other'];
-const statuses = ['Open','Assigned','In Progress','Pending User','Resolved','Closed'];
-const priorities = ['Low','Normal','High','Urgent'];
-const seedTickets = [
-  { id:'IT-2026-001', subject:'Locked Account', category:'Locked Account', description:'I cannot access my university account.', priority:'Normal', status:'Open', requesterId:'user', requesterName:'Miguel Mendoza', requesterEmail:'miguel.mendoza@university.edu', assignedTo:null, createdAt:'2026-09-09T09:30:00', updatedAt:'2026-09-09T09:30:00', messages:[], internalNotes:[], history:[{actor:'System', text:'Ticket created', at:'2026-09-09T09:30:00'}] },
-  { id:'IT-2026-002', subject:'No Internet Connection', category:'Network/Internet', description:'The wireless connection in the library is unavailable.', priority:'High', status:'In Progress', requesterId:'student', requesterName:'Student User', requesterEmail:'student@university.edu', assignedTo:'Jordan Lee', createdAt:'2026-09-10T10:00:00', updatedAt:'2026-09-11T08:00:00', messages:[{author:'Jordan Lee', role:'IT Staff', text:'We are checking the access point.', at:'2026-09-11T08:00:00'}], internalNotes:[], history:[] },
-  { id:'IT-2026-003', subject:'Forgotten Password', category:'Password Reset', description:'Please help me reset my portal password.', priority:'Normal', status:'Resolved', requesterId:'faculty', requesterName:'Faculty User', requesterEmail:'faculty@university.edu', assignedTo:'Priya Shah', createdAt:'2026-09-05T08:00:00', updatedAt:'2026-09-06T15:00:00', messages:[{author:'Priya Shah', role:'IT Staff', text:'Your password has been reset. Please sign in again.', at:'2026-09-06T15:00:00'}], internalNotes:[], history:[] },
-  { id:'IT-2026-004', subject:'Printer Not Working', category:'Printer/Peripheral', description:'The printer in Room 204 is displaying an error.', priority:'Low', status:'Pending User', requesterId:'staff', requesterName:'Staff User', requesterEmail:'staff@university.edu', assignedTo:'Marcus Chen', createdAt:'2026-09-03T13:00:00', updatedAt:'2026-09-04T11:00:00', messages:[], internalNotes:[], history:[] },
-  { id:'IT-2026-005', subject:'University Portal Error', category:'System/Portal Issue', description:'The enrollment portal shows an unexpected error.', priority:'High', status:'Resolved', requesterId:'student', requesterName:'Student User', requesterEmail:'student@university.edu', assignedTo:'Jordan Lee', createdAt:'2026-08-28T09:00:00', updatedAt:'2026-08-29T16:00:00', messages:[], internalNotes:[], history:[] }
-];
-const seedNotifications = [{ id:1, role:'staff', text:'New ticket IT-2026-001 has been submitted.', read:false }, { id:2, role:'user', text:'Welcome to CampusHelp. Your tickets will appear here.', read:true }];
-function initialData(){ try { const d=JSON.parse(localStorage.getItem(KEY)); if(d?.tickets) return d; } catch {} return {tickets:seedTickets, notifications:seedNotifications, next:6}; }
-function persist(d){ localStorage.setItem(KEY, JSON.stringify(d)); }
-function fmt(v){ return new Date(v).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
-function time(v){ return new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
-function Icon({children}){ return <span className="icon" aria-hidden="true">{children}</span>; }
-function Logo(){ return <Link className="brand" to="/"><span className="logo"><Icon>⌁</Icon></span><span><b>CampusHelp</b><small>Department of Information Technology</small></span></Link>; }
-function Status({value}){ return <span className={'badge status-'+value.toLowerCase().replaceAll(' ','-')}>{value}</span>; }
-function Priority({value}){ return <span className={'priority priority-'+value.toLowerCase()}><i/> {value}</span>; }
-function Protected({role, children}){ const session=JSON.parse(localStorage.getItem('campushelp-session')||'null'); if(!session) return <Navigate to="/login" replace/>; if(role && session.role!==role) return <Navigate to={'/'+session.role+'/dashboard'} replace/>; return children; }
-function useData(){ const [data,setData]=useState(initialData); const update=fn=>setData(old=>{const next=fn({...old,tickets:old.tickets.map(x=>({...x})),notifications:[...old.notifications]}); persist(next); return next;}); return [data,update]; }
-function Shell({role, children}){ const nav=useNavigate(); const session=JSON.parse(localStorage.getItem('campushelp-session')||'null'); const [data,update]=useData(); const loc=useLocation(); const [open,setOpen]=useState(false); const links={user:[['Dashboard','/user/dashboard','⌂'],['Create Ticket','/user/create-ticket','＋'],['My Tickets','/user/tickets','▤'],['Notifications','/user/notifications','♢'],['Profile','/user/profile','◉']],staff:[['Dashboard','/staff/dashboard','⌂'],['All Tickets','/staff/tickets','▤'],['My Assigned Tickets','/staff/assigned','✓'],['Notifications','/staff/notifications','♢'],['Profile','/staff/profile','◉']],admin:[['Dashboard','/admin/dashboard','⌂'],['All Tickets','/admin/tickets','▤'],['Users','/admin/users','♙'],['IT Staff','/admin/staff','♧'],['Reports & Analytics','/admin/analytics','▥'],['Settings','/admin/settings','⚙']]}; const unread=data.notifications.filter(n=>n.role===role&&!n.read).length;
-  function logout(){ localStorage.removeItem('campushelp-session'); nav('/login'); }
-  return <div className="app-shell"><aside className={open?'sidebar open':'sidebar'}><Logo/><div className="side-label">WORKSPACE</div><nav>{links[role].map(([label,to,ic])=><Link key={to} className={loc.pathname===to?'active':''} to={to} onClick={()=>setOpen(false)}><Icon>{ic}</Icon>{label}{label==='Notifications'&&unread>0&&<em>{unread}</em>}</Link>)}</nav><div className="side-bottom"><div className="support-card"><strong>Need help?</strong><span>Our IT team is here for you.</span><Link to={'/'+role+'/tickets'}>View support center →</Link></div><button className="logout" onClick={logout}><Icon>↪</Icon> Log out</button></div></aside><div className="main-area"><header className="topbar"><button className="mobile-menu" onClick={()=>setOpen(!open)}>☰</button><div className="crumb">{role==='admin'?'Administration':role==='staff'?'IT Staff workspace':'My workspace'} <span>/</span> {loc.pathname.split('/').pop().replaceAll('-',' ')}</div><div className="top-user"><div className="avatar">{session?.name?.split(' ').map(x=>x[0]).join('')}</div><div><b>{session?.name}</b><small>{role==='admin'?'Administrator':role==='staff'?'IT Staff':'Student'}</small></div></div></header><main className="content">{children}</main></div></div>;
+import {
+  pool,
+  ensureSchema,
+  seedDefaultAccounts,
+  normalizeEmail,
+  isMapuaEmail,
+  sanitizeUser,
+  logAudit,
+  createNotification
+} from './db.js';
+
+dotenv.config();
+
+const app = express();
+const port = Number(process.env.PORT || 3001);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadDir = path.join(__dirname, '../uploads');
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
-function PageHead({eyebrow,title,description,action}){ return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{description&&<p>{description}</p>}</div>{action}</div>; }
-function Cards({items}){return <div className="stat-grid">{items.map(x=><div className="stat-card" key={x.label}><div className={'stat-icon '+(x.tone||'')}><Icon>{x.icon}</Icon></div><div><span>{x.label}</span><strong>{x.value}</strong><small>{x.note}</small></div></div>)}</div>}
-function TicketTable({tickets, linkPrefix, empty='No tickets found.'}){const navigate=useNavigate(); if(!tickets.length)return <div className="empty"><div>⌁</div><h3>{empty}</h3><p>Try adjusting your filters or create a new ticket.</p></div>; return <div className="table-wrap"><table><thead><tr><th>Ticket ID</th><th>Requester</th><th>Subject</th><th>Category</th><th>Priority</th><th>Date submitted</th><th>Assigned to</th><th>Status</th></tr></thead><tbody>{tickets.map(t=><tr key={t.id} onClick={()=>linkPrefix&&navigate(linkPrefix+'/'+t.id)}><td><b className="ticket-id">{t.id}</b></td><td>{t.requesterName}</td><td><strong>{t.subject}</strong></td><td>{t.category}</td><td><Priority value={t.priority}/></td><td>{fmt(t.createdAt)}</td><td>{t.assignedTo||<span className="muted">Unassigned</span>}</td><td><Status value={t.status}/></td></tr>)}</tbody></table></div>}
-function FilterBar({setSearch, setStatus, setCategory, setPriority, staffFilter=false}){return <div className="filters"><label className="search">⌕<input placeholder="Search tickets..." onChange={e=>setSearch(e.target.value)}/></label><select onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option>{statuses.map(x=><option key={x}>{x}</option>)}</select><select onChange={e=>setCategory(e.target.value)}><option value="">All categories</option>{categories.map(x=><option key={x}>{x}</option>)}</select>{staffFilter&&<select onChange={e=>setPriority(e.target.value)}><option value="">All priorities</option>{priorities.map(x=><option key={x}>{x}</option>)}</select>}</div>}
-function Dashboard({role}){const [data]=useData(); const session=JSON.parse(localStorage.getItem('campushelp-session')); const mine=role==='user'?data.tickets.filter(t=>t.requesterId==='user'):data.tickets; const counts=s=>mine.filter(t=>t.status===s).length; const cards=role==='user'?[['Open',counts('Open'),'blue','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Resolved',counts('Resolved'),'green','✓'],['Total Tickets',mine.length,'orange','▤']]:role==='staff'?[['New Tickets',counts('Open'),'blue','✦'],['Open Tickets',counts('Open'),'orange','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Pending User',counts('Pending User'),'amber','!'],['Resolved',counts('Resolved'),'green','✓']]:[['Total Tickets',data.tickets.length,'blue','▤'],['Open Tickets',data.tickets.filter(t=>['Open','Assigned'].includes(t.status)).length,'orange','⌁'],['In Progress',counts('In Progress'),'purple','↻'],['Resolved',counts('Resolved'),'green','✓'],['Avg. Resolution','2.4d','blue','◷']]; return <><PageHead eyebrow={role==='admin'?'ADMINISTRATION':'OVERVIEW'} title={role==='admin'?'CampusHelp Analytics':<>Welcome back, {session.name.split(' ')[0]}</>} description={role==='admin'?'A clear view of your department’s support operations.':'Here’s what is happening with your support requests today.'} action={role==='user'&&<Link className="button primary" to="/user/create-ticket">＋ Create New Ticket</Link>}/><Cards items={cards.map(([label,value,tone,icon])=>({label,value,tone,icon,note:label==='Total Tickets'?'Across all time':label==='Resolved'?'Successfully resolved':'Updated today'}))}/>{role==='admin'?<AdminOverview tickets={data.tickets}/>:<section className="panel"><div className="panel-head"><div><h2>{role==='staff'?'Ticket queue':'Recent tickets'}</h2><p>{role==='staff'?'Tickets that need your team’s attention.':'Keep track of your latest support requests.'}</p></div><Link to={role==='staff'?'/staff/tickets':'/user/tickets'} className="text-link">View all →</Link></div><TicketTable tickets={mine.slice(0,5)} linkPrefix={role==='staff'?'/staff/tickets':'/user/tickets'}/></section>}</>}
-function AdminOverview({tickets}){const byCat=categories.slice(0,6).map(c=>[c,tickets.filter(t=>t.category===c).length]); const max=Math.max(1,...byCat.map(x=>x[1])); return <div className="two-col"><section className="panel"><div className="panel-head"><div><h2>Tickets by category</h2><p>Distribution across support areas.</p></div><Link className="text-link" to="/admin/analytics">View report →</Link></div><div className="bars">{byCat.map(([c,n])=><div className="bar-row" key={c}><span>{c}</span><div><i style={{width:`${n/max*100}%`}}/></div><b>{n}</b></div>)}</div></section><section className="panel"><div className="panel-head"><div><h2>Tickets by status</h2><p>Current workload snapshot.</p></div></div><div className="status-list">{statuses.slice(0,5).map(s=><div key={s}><span><Status value={s}/></span><b>{tickets.filter(t=>t.status===s).length}</b></div>)}</div></section></div>}
-function TicketList({role, assigned=false}){const [data]=useData(); const [search,setSearch]=useState(''),[status,setStatus]=useState(''),[category,setCategory]=useState(''),[priority,setPriority]=useState(''); let tickets=data.tickets.filter(t=>role==='user'?t.requesterId==='user':(!assigned||t.assignedTo==='Jordan Lee')); tickets=tickets.filter(t=>JSON.stringify(t).toLowerCase().includes(search.toLowerCase())&&(!status||t.status===status)&&(!category||t.category===category)&&(!priority||t.priority===priority)); return <><PageHead eyebrow={role==='user'?'SUPPORT REQUESTS':'TICKET MANAGEMENT'} title={assigned?'My assigned tickets':role==='user'?'My tickets':'All tickets'} description="Search, filter, and select a ticket to view its details." action={role==='user'&&<Link className="button primary" to="/user/create-ticket">＋ Create Ticket</Link>}/><section className="panel"><FilterBar {...{setSearch,setStatus,setCategory,setPriority}} staffFilter={role!=='user'}/><TicketTable tickets={tickets} linkPrefix={'/'+role+'/tickets'}/></section></>}
-function CreateTicket(){const [data,update]=useData(); const nav=useNavigate(); const [form,setForm]=useState({subject:'',category:'',description:'',priority:'Normal'}); const [error,setError]=useState(''); function submit(e){e.preventDefault();if(!form.subject||!form.category||!form.description)return setError('Please complete the required fields.');const now=new Date().toISOString();const id=`IT-2026-${String(data.next).padStart(3,'0')}`;const ticket={...form,id,status:'Open',requesterId:'user',requesterName:'Miguel Mendoza',requesterEmail:'miguel.mendoza@university.edu',assignedTo:null,createdAt:now,updatedAt:now,messages:[],internalNotes:[],history:[{actor:'System',text:'Ticket created',at:now}]};update(d=>({...d,next:d.next+1,tickets:[ticket,...d.tickets],notifications:[{id:Date.now(),role:'staff',text:`New ticket ${id} has been submitted.`,read:false},...d.notifications]}));nav('/user/tickets/'+id);}
- return <><PageHead eyebrow="NEW REQUEST" title="Create a ticket" description="Tell us what you need help with and our IT team will get back to you."/><form className="form-card" onSubmit={submit}><div className="form-grid"><label>Subject <span>*</span><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="Unable to access my university account"/></label><label>Category <span>*</span><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option value="">Select a category</option>{categories.map(x=><option key={x}>{x}</option>)}</select></label><label className="full">Description <span>*</span><textarea rows="7" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Describe the issue and any steps you have already tried."/></label><label>Priority<select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>{priorities.map(x=><option key={x}>{x}</option>)}</select></label><label>Attachment<small className="hint">Attach screenshot or supporting file (optional)</small><input type="file"/></label></div>{error&&<div className="error">{error}</div>}<div className="form-actions"><Link className="button secondary" to="/user/dashboard">Cancel</Link><button className="button primary">Submit Ticket</button></div></form></>}
-function TicketDetail({role}){const {ticketId}=useParams(); const [data,update]=useData(); const ticket=data.tickets.find(t=>t.id===ticketId); const nav=useNavigate(); const [reply,setReply]=useState(''); const [note,setNote]=useState(''); const [draft,setDraft]=useState(ticket||{}); if(!ticket)return <div className="empty"><h3>Ticket not found</h3><Link to={'/'+role+'/tickets'}>Return to tickets</Link></div>; const canEdit=role!=='user'; function save(withReply=false){const now=new Date().toISOString();let message=withReply&&reply?{author:'Jordan Lee',role:'IT Staff',text:reply,at:now}:null; const changed=[];if(draft.status!==ticket.status)changed.push(`Status changed from ${ticket.status} to ${draft.status}.`);if(draft.assignedTo!==ticket.assignedTo)changed.push(`Ticket assigned to ${draft.assignedTo||'Unassigned'}.`);update(d=>({...d,tickets:d.tickets.map(t=>t.id!==ticketId?t:{...t,...draft,updatedAt:now,messages:message?[...t.messages,message]:t.messages,internalNotes:note?[...t.internalNotes,{author:'Jordan Lee',text:note,at:now}]:t.internalNotes,history:[...t.history,...changed.map(text=>({actor:'System',text,at:now})),...(message?[{actor:'Jordan Lee',text:'IT Staff responded',at:now}]:[])]}),notifications:withReply||changed.length? [{id:Date.now(),role:'user',text:withReply?`IT Staff replied to your ticket ${ticketId}.`:`Your ticket ${ticketId} status has changed to ${draft.status}.`,read:false},...d.notifications]:d.notifications}));setReply('');setNote('');nav('/'+role+'/tickets/'+ticketId);}
- return <><PageHead eyebrow="TICKET DETAILS" title={ticket.subject} description={<span className="ticket-id">{ticket.id}</span>} action={<Link className="button secondary" to={'/'+role+'/tickets'}>← Back to tickets</Link>}/><div className="detail-grid"><div><section className="panel ticket-summary"><div className="summary-top"><div><span className="muted">Current status</span><Status value={ticket.status}/></div><Priority value={ticket.priority}/></div><h2>{ticket.subject}</h2><p>{ticket.description}</p><div className="meta-grid"><span><b>Category</b>{ticket.category}</span><span><b>Submitted</b>{fmt(ticket.createdAt)}</span><span><b>Last updated</b>{fmt(ticket.updatedAt)}</span><span><b>Assigned IT staff</b>{ticket.assignedTo||'Unassigned'}</span></div></section><section className="panel"><div className="panel-head"><div><h2>Conversation</h2><p>Updates and responses on this request.</p></div></div><div className="timeline">{ticket.history.map((h,i)=><div className="timeline-item" key={i}><div className="timeline-dot">{h.actor==='System'?'⌁':'◉'}</div><div><b>{h.actor}</b><small>{time(h.at)}</small><p>{h.text}</p></div></div>)}{ticket.messages.map((m,i)=><div className="timeline-item" key={'m'+i}><div className="timeline-dot">◉</div><div><b>{m.author} <small>{m.role}</small></b><small>{time(m.at)}</small><p>{m.text}</p></div></div>)}</div></section></div>{canEdit&&<aside><section className="panel"><div className="panel-head"><h2>Manage ticket</h2></div><label>Status<select value={draft.status} onChange={e=>setDraft({...draft,status:e.target.value})}>{statuses.map(x=><option key={x}>{x}</option>)}</select></label><label>Assignment<select value={draft.assignedTo||''} onChange={e=>setDraft({...draft,assignedTo:e.target.value||null})}><option value="">Unassigned</option>{staff.map(x=><option key={x.name}>{x.name}</option>)}</select></label><label>Priority<select value={draft.priority} onChange={e=>setDraft({...draft,priority:e.target.value})}>{priorities.map(x=><option key={x}>{x}</option>)}</select></label><button className="button primary full-button" onClick={()=>save(false)}>Save Changes</button><button className="button success full-button" onClick={()=>{setDraft({...draft,status:'Resolved'});setTimeout(()=>save(false),0)}}>✓ Mark as Resolved</button></section><section className="panel"><h2>Respond to requester</h2><textarea rows="5" value={reply} onChange={e=>setReply(e.target.value)} placeholder="Write a response..."/><button className="button primary full-button" onClick={()=>save(true)} disabled={!reply}>Send Response</button><h3 className="note-title">Internal note</h3><textarea rows="3" value={note} onChange={e=>setNote(e.target.value)} placeholder="Visible only to IT Staff and Admin"/></section></aside>}</div></>}
-function Notifications({role}){const [data,update]=useData();const notes=data.notifications.filter(n=>n.role===role);return <><PageHead eyebrow="INBOX" title="Notifications" description="Stay up to date with activity on your support tickets."/><section className="panel notification-list">{notes.map(n=><div className={n.read?'notification':'notification unread'} key={n.id}><div className="notification-icon">♢</div><div><p>{n.text}</p><small>CampusHelp notification</small></div>{!n.read&&<button onClick={()=>update(d=>({...d,notifications:d.notifications.map(x=>x.id===n.id?{...x,read:true}:x)}))}>Mark read</button>}</div>)}</section></>}
-function Profile({role}){const u=users.find(x=>x.role===role);return <><PageHead eyebrow="ACCOUNT" title="Profile" description="Your CampusHelp account information."/><section className="profile-card"><div className="profile-avatar">{u.name.split(' ').map(x=>x[0]).join('')}</div><h2>{u.name}</h2><p>{u.email}</p><div className="profile-fields"><span><b>{role==='user'?'Student ID':role==='staff'?'Employee ID':'Account ID'}</b>{u.id}</span><span><b>Department</b>{u.department}</span><span><b>Role</b>{role==='admin'?'Administrator':role==='staff'?'IT Staff':'User'}</span></div></section></>}
-function AdminPages({type}){const [data]=useData(); if(type==='users')return <><PageHead eyebrow="ADMINISTRATION" title="Users" description="Directory of CampusHelp users."/><section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th></tr></thead><tbody>{users.map(u=><tr key={u.username}><td><strong>{u.name}</strong></td><td>{u.username}</td><td>{u.email}</td><td>{u.department}</td><td>{u.role}</td><td><span className="online">Active</span></td></tr>)}</tbody></table></div></section></>; if(type==='staff')return <><PageHead eyebrow="ADMINISTRATION" title="IT Staff" description="Monitor team capacity and workload."/><section className="panel"><div className="table-wrap"><table><thead><tr><th>Name</th><th>Employee ID</th><th>Email</th><th>Active tickets</th><th>Resolved tickets</th><th>Status</th></tr></thead><tbody>{staff.map(s=><tr key={s.username}><td><strong>{s.name}</strong></td><td>IT-0042</td><td>{s.username}@university.edu</td><td>{data.tickets.filter(t=>t.assignedTo===s.name&&!['Resolved','Closed'].includes(t.status)).length}</td><td>{data.tickets.filter(t=>t.assignedTo===s.name&&t.status==='Resolved').length}</td><td><span className="online">Available</span></td></tr>)}</tbody></table></div></section></>; return <><PageHead eyebrow="REPORTS & ANALYTICS" title="Reports & Analytics" description="Explore trends derived from the live ticket dataset."/><AdminOverview tickets={data.tickets}/><section className="panel"><div className="panel-head"><div><h2>Tickets over time</h2><p>Ticket volume by recent submission date.</p></div></div><div className="line-chart">{[1,2,3,4,5,6,7].map((x,i)=><div key={x} style={{height:`${25+(data.tickets.length*13+i*8)%65}%`}}><i/><span>Sep {x+1}</span></div>)}</div></section></>}
-function Login(){const nav=useNavigate();const [form,setForm]=useState({username:'',password:'',remember:true});const [error,setError]=useState('');function submit(e){e.preventDefault();const u=users.find(x=>x.username===form.username&&x.password===form.password);if(!u)return setError('Invalid username or password.');localStorage.setItem('campushelp-session',JSON.stringify(u));nav('/'+u.role+'/dashboard');}return <div className="login-page"><div className="login-art"><Logo/><div className="art-copy"><div className="eyebrow">UNIVERSITY IT SUPPORT</div><h1>Help when you need it.<br/><em>Support you can trust.</em></h1><p>CampusHelp makes it simple to report technology issues and stay connected with the people working to solve them.</p><div className="art-stat"><b>24/7</b><span>IT support visibility<br/>for our campus community</span></div></div></div><div className="login-panel"><div className="login-form"><div className="mobile-logo"><Logo/></div><div className="eyebrow">WELCOME BACK</div><h1>Sign in to CampusHelp</h1><p>Use your university credentials to continue.</p><form onSubmit={submit}><label>Username<input autoFocus value={form.username} onChange={e=>setForm({...form,username:e.target.value})} placeholder="Enter your username"/></label><label>Password<div className="password"><input type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="Enter your password"/><span>◉</span></div></label><div className="login-options"><label className="check"><input type="checkbox" checked={form.remember} onChange={e=>setForm({...form,remember:e.target.checked})}/> Remember me</label><a href="#forgot">Forgot password?</a></div>{error&&<div className="error">{error}</div>}<button className="button primary login-button">Sign in</button></form><div className="demo"><b>Demo accounts</b><span>User: <code>user / user123</code></span><span>IT Staff: <code>itstaff / staff123</code></span><span>Admin: <code>admin / admin123</code></span></div></div></div></div>}
-export default function App(){return <Routes><Route path="/login" element={<Login/>}/><Route path="/" element={<Navigate to="/login" replace/>}/><Route path="/user/*" element={<Protected role="user"><Shell role="user"><Routes><Route path="dashboard" element={<Dashboard role="user"/>}/><Route path="create-ticket" element={<CreateTicket/>}/><Route path="tickets" element={<TicketList role="user"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="user"/>}/><Route path="notifications" element={<Notifications role="user"/>}/><Route path="profile" element={<Profile role="user"/>}/></Routes></Shell></Protected>}/><Route path="/staff/*" element={<Protected role="staff"><Shell role="staff"><Routes><Route path="dashboard" element={<Dashboard role="staff"/>}/><Route path="tickets" element={<TicketList role="staff"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="staff"/>}/><Route path="assigned" element={<TicketList role="staff" assigned/>}/><Route path="notifications" element={<Notifications role="staff"/>}/><Route path="profile" element={<Profile role="staff"/>}/></Routes></Shell></Protected>}/><Route path="/admin/*" element={<Protected role="admin"><Shell role="admin"><Routes><Route path="dashboard" element={<Dashboard role="admin"/>}/><Route path="tickets" element={<TicketList role="admin"/>}/><Route path="tickets/:ticketId" element={<TicketDetail role="admin"/>}/><Route path="users" element={<AdminPages type="users"/>}/><Route path="staff" element={<AdminPages type="staff"/>}/><Route path="analytics" element={<AdminPages type="analytics"/>}/><Route path="settings" element={<Profile role="admin"/>}/></Routes></Shell></Protected>}/></Routes>}
+
+const PgSessionStore = pgSession(session);
+
+app.use(
+  cors({
+    origin: true,
+    credentials: true
+  })
+);
+
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+app.use(
+  session({
+    store: new PgSessionStore({
+      pool,
+      tableName: 'session',
+      createTableIfMissing: true
+    }),
+    secret: process.env.SESSION_SECRET || 'campushelp-dev-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: false,
+      maxAge: 1000 * 60 * 60 * 10
+    }
+  })
+);
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`;
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error('Only PDF, PNG, and JPG files are allowed for ECM documents.'));
+  }
+});
+
+app.use('/uploads', express.static(uploadDir));
+
+async function requireAuth(req, res, next) {
+  if (!req.session?.userId) {
+    return res.status(401).json({ message: 'Authentication required.' });
+  }
+
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE user_id = $1', [req.session.userId]);
+    if (!result.rows[0]) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ message: 'Session invalid or expired.' });
+    }
+
+    req.user = result.rows[0];
+    next();
+  } catch (error) {
+    console.error('Auth lookup failed:', error);
+    return res.status(500).json({ message: 'Unable to verify session.' });
+  }
+}
+
+function authorizeRole(req, res, allowedRoles) {
+  if (!req.user) {
+    return false;
+  }
+
+  if (!allowedRoles.includes(req.user.role)) {
+    return false;
+  }
+
+  return true;
+}
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, message: 'CampusHelp API is running.' });
+});
+
+app.post('/api/auth/register', upload.single('ecm'), async (req, res) => {
+  try {
+    const payload = req.body;
+    const fullName = String(payload.full_name || payload.fullName || '').trim();
+    const email = normalizeEmail(payload.email || payload.emailAddress || '');
+    const password = String(payload.password || '');
+    const confirmPassword = String(payload.confirmPassword || payload.confirm_password || '');
+    const accountType = String(payload.account_type || payload.accountType || 'Student');
+    const studentNumber = String(payload.student_number || payload.studentNumber || '').trim();
+    const employeeId = String(payload.employee_id || payload.employeeId || '').trim();
+    const department = String(payload.department || '').trim();
+
+    if (!fullName) {
+      return res.status(400).json({ message: 'Full name is required.' });
+    }
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ message: 'A valid email is required.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ message: 'Passwords do not match.' });
+    }
+
+    if (!['Student', 'Faculty'].includes(accountType)) {
+      return res.status(400).json({ message: 'Invalid account type.' });
+    }
+
+    if (!isMapuaEmail(email, accountType)) {
+      return res.status(400).json({ message: 'Mapúa email is required. Use your @mymail.mapua.edu.ph address.' });
+    }
+
+    const existingUser = await pool.query('SELECT user_id FROM users WHERE email = $1', [email]);
+    if (existingUser.rowCount > 0) {
+      return res.status(409).json({ message: 'An account with that email already exists.' });
+    }
+
+    if (accountType === 'Student') {
+      if (!studentNumber) {
+        return res.status(400).json({ message: 'Student number is required.' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'Student ECM upload is required.' });
+      }
+    }
+
+    if (accountType === 'Faculty' && !employeeId && department) {
+      // employee id is optional for now, but if a faculty member enters one it is kept.
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const storedEcmPath = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const result = await pool.query(
+      `
+        INSERT INTO users (
+          full_name,
+          email,
+          password_hash,
+          role,
+          account_type,
+          student_number,
+          employee_id,
+          department,
+          ecm_file_path
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [
+        fullName,
+        email,
+        passwordHash,
+        'User',
+        accountType,
+        accountType === 'Student' ? studentNumber : null,
+        accountType === 'Faculty' ? employeeId || null : null,
+        department || null,
+        storedEcmPath
+      ]
+    );
+
+    const user = sanitizeUser(result.rows[0]);
+    req.session.userId = user.user_id;
+    await logAudit(user.user_id, null, 'Registration');
+
+    return res.status(201).json({
+      message: 'Registration successful.',
+      user
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+
+    if (error.message && error.message.includes('Only PDF')) {
+      return res.status(400).json({ message: error.message });
+    }
+
+    return res.status(500).json({ message: 'Registration failed. Please try again.' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email || req.body.emailAddress || '');
+    const password = String(req.body.password || '');
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+
+    req.session.userId = user.user_id;
+    await logAudit(user.user_id, null, 'Login');
+
+    return res.json({
+      message: 'Login successful.',
+      user: sanitizeUser(user)
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(500).json({ message: 'Login failed. Please try again.' });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  req.session.destroy((error) => {
+    if (error) {
+      return res.status(500).json({ message: 'Unable to log out.' });
+    }
+
+    return res.json({ message: 'Logged out.' });
+  });
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  if (!req.session?.userId) {
+    return res.status(401).json({ message: 'Not authenticated.' });
+  }
+
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE user_id = $1', [req.session.userId]);
+    const user = result.rows[0];
+
+    if (!user) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ message: 'Session invalid or expired.' });
+    }
+
+    return res.json({ user: sanitizeUser(user) });
+  } catch (error) {
+    console.error('Auth me error:', error);
+    return res.status(500).json({ message: 'Unable to load session.' });
+  }
+});
+
+app.get('/api/tickets', requireAuth, async (req, res) => {
+  try {
+    const role = req.user.role;
+
+    let query = `
+      SELECT t.*, 
+             requester.full_name AS requester_name,
+             assigned.full_name AS assigned_staff_name,
+             requester.email AS requester_email
+      FROM tickets t
+      LEFT JOIN users requester ON requester.user_id = t.requester_id
+      LEFT JOIN users assigned ON assigned.user_id = t.assigned_staff_id
+    `;
+
+    const params = [];
+
+    if (role === 'User') {
+      query += ' WHERE t.requester_id = $1';
+      params.push(req.user.user_id);
+    }
+
+    query += ' ORDER BY t.created_at DESC';
+
+    const result = await pool.query(query, params);
+    return res.json({ tickets: result.rows });
+  } catch (error) {
+    console.error('List tickets error:', error);
+    return res.status(500).json({ message: 'Unable to load tickets.' });
+  }
+});
+
+app.get('/api/tickets/:id', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT t.*, 
+               requester.full_name AS requester_name,
+               assigned.full_name AS assigned_staff_name,
+               requester.email AS requester_email
+        FROM tickets t
+        LEFT JOIN users requester ON requester.user_id = t.requester_id
+        LEFT JOIN users assigned ON assigned.user_id = t.assigned_staff_id
+        WHERE t.ticket_id = $1
+      `,
+      [req.params.id]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ message: 'Ticket not found.' });
+    }
+
+    const ticket = result.rows[0];
+    const authorized =
+      req.user.role !== 'User' || ticket.requester_id === req.user.user_id;
+
+    if (!authorized) {
+      return res.status(403).json({ message: 'You are not authorized to view this ticket.' });
+    }
+
+    const messagesResult = await pool.query(
+      `
+        SELECT tm.*, u.full_name AS sender_name, u.email AS sender_email
+        FROM ticket_messages tm
+        LEFT JOIN users u ON u.user_id = tm.sender_id
+        WHERE tm.ticket_id = $1
+        ORDER BY tm.sent_at ASC
+      `,
+      [req.params.id]
+    );
+
+    return res.json({ ticket, messages: messagesResult.rows });
+  } catch (error) {
+    console.error('Fetch ticket error:', error);
+    return res.status(500).json({ message: 'Unable to load ticket details.' });
+  }
+});
+
+app.post('/api/tickets', requireAuth, async (req, res) => {
+  try {
+    const ticket = req.body || {};
+    const subject = String(ticket.subject || '').trim();
+    const description = String(ticket.description || '').trim();
+    const category = String(ticket.category || 'Other').trim();
+    const priority = String(ticket.priority || 'Medium');
+    const suggestedCategory = String(ticket.suggested_category || '').trim();
+    const suggestedPriority = String(ticket.suggested_priority || '').trim();
+    const priorityManuallyEscalated = Boolean(ticket.priority_manually_escalated);
+
+    if (!subject || !description) {
+      return res.status(400).json({ message: 'Subject and description are required.' });
+    }
+
+    const result = await pool.query(
+      `
+        INSERT INTO tickets (
+          requester_id,
+          subject,
+          description,
+          category,
+          suggested_category,
+          priority,
+          suggested_priority,
+          priority_manually_escalated,
+          status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Open')
+        RETURNING *
+      `,
+      [
+        req.user.user_id,
+        subject,
+        description,
+        category,
+        suggestedCategory || null,
+        priority,
+        suggestedPriority || null,
+        priorityManuallyEscalated
+      ]
+    );
+
+    const createdTicket = result.rows[0];
+    const staffUsers = await pool.query(`SELECT user_id FROM users WHERE role IN ('IT Staff', 'Administrator')`);
+
+    for (const staffUser of staffUsers.rows) {
+      await createNotification(staffUser.user_id, createdTicket.ticket_id, `New ticket: ${subject}`);
+    }
+
+    await logAudit(req.user.user_id, createdTicket.ticket_id, 'Ticket creation');
+
+    return res.status(201).json({
+      message: 'Ticket submitted successfully.',
+      ticket: createdTicket
+    });
+  } catch (error) {
+    console.error('Create ticket error:', error);
+    return res.status(500).json({ message: 'Ticket submission failed.' });
+  }
+});
+
+app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
+  try {
+    const ticketId = Number(req.params.id);
+    const existing = await pool.query('SELECT * FROM tickets WHERE ticket_id = $1', [ticketId]);
+
+    if (!existing.rows[0]) {
+      return res.status(404).json({ message: 'Ticket not found.' });
+    }
+
+    const ticket = existing.rows[0];
+    const isAllowedAdminStaff = ['IT Staff', 'Administrator'].includes(req.user.role);
+    const isRequester = ticket.requester_id === req.user.user_id;
+
+    if (!isAllowedAdminStaff && !isRequester) {
+      return res.status(403).json({ message: 'You do not have permission to update this ticket.' });
+    }
+
+    const status = String(req.body.status || ticket.status);
+    const priority = String(req.body.priority || ticket.priority);
+    const category = String(req.body.category || ticket.category);
+    const assignedStaffId = req.body.assigned_staff_id !== undefined ? Number(req.body.assigned_staff_id) : ticket.assigned_staff_id;
+
+    const updateResult = await pool.query(
+      `
+        UPDATE tickets
+        SET status = $1,
+            priority = $2,
+            category = $3,
+            assigned_staff_id = $4,
+            updated_at = NOW(),
+            resolved_at = CASE WHEN $1 = 'Resolved' OR $1 = 'Closed' THEN NOW() ELSE NULL END
+        WHERE ticket_id = $5
+        RETURNING *
+      `,
+      [status, priority, category, assignedStaffId, ticketId]
+    );
+
+    const updatedTicket = updateResult.rows[0];
+
+    if (req.body.message && String(req.body.message).trim()) {
+      await pool.query(
+        `INSERT INTO ticket_messages (ticket_id, sender_id, message) VALUES ($1, $2, $3)`,
+        [ticketId, req.user.user_id, String(req.body.message).trim()]
+      );
+
+      await createNotification(ticket.requester_id, ticketId, `New response on ticket #${ticketId}`);
+      await logAudit(req.user.user_id, ticketId, 'IT Staff response');
+    }
+
+    if (ticket.requester_id !== req.user.user_id) {
+      await createNotification(ticket.requester_id, ticketId, `Ticket status updated to ${status}.`);
+    }
+
+    await logAudit(req.user.user_id, ticketId, 'Ticket update');
+
+    return res.json({ message: 'Ticket updated successfully.', ticket: updatedTicket });
+  } catch (error) {
+    console.error('Ticket patch error:', error);
+    return res.status(500).json({ message: 'The ticket could not be updated.' });
+  }
+});
+
+app.get('/api/tickets/:id/messages', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT tm.*, u.full_name AS sender_name, u.email AS sender_email
+        FROM ticket_messages tm
+        LEFT JOIN users u ON u.user_id = tm.sender_id
+        WHERE tm.ticket_id = $1
+        ORDER BY tm.sent_at ASC
+      `,
+      [req.params.id]
+    );
+
+    return res.json({ messages: result.rows });
+  } catch (error) {
+    console.error('Ticket messages error:', error);
+    return res.status(500).json({ message: 'Unable to load conversation.' });
+  }
+});
+
+app.post('/api/tickets/:id/messages', requireAuth, async (req, res) => {
+  try {
+    const message = String(req.body.message || '').trim();
+    if (!message) {
+      return res.status(400).json({ message: 'Message content is required.' });
+    }
+
+    const ticketCheck = await pool.query('SELECT * FROM tickets WHERE ticket_id = $1', [req.params.id]);
+    if (!ticketCheck.rows[0]) {
+      return res.status(404).json({ message: 'Ticket not found.' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO ticket_messages (ticket_id, sender_id, message) VALUES ($1, $2, $3) RETURNING *`,
+      [req.params.id, req.user.user_id, message]
+    );
+
+    const otherUserId = ticketCheck.rows[0].requester_id === req.user.user_id
+      ? ticketCheck.rows[0].assigned_staff_id
+      : ticketCheck.rows[0].requester_id;
+
+    if (otherUserId) {
+      await createNotification(otherUserId, Number(req.params.id), 'A new ticket message was posted.');
+    }
+
+    await logAudit(req.user.user_id, Number(req.params.id), 'Ticket message sent');
+    return res.status(201).json({ message: result.rows[0] });
+  } catch (error) {
+    console.error('Message create error:', error);
+    return res.status(500).json({ message: 'Unable to send message.' });
+  }
+});
+
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.user_id]
+    );
+
+    return res.json({ notifications: result.rows });
+  } catch (error) {
+    console.error('Load notifications error:', error);
+    return res.status(500).json({ message: 'Unable to load notifications.' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE notifications SET is_read = TRUE WHERE notification_id = $1 AND user_id = $2 RETURNING *`,
+      [req.params.id, req.user.user_id]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ message: 'Notification not found.' });
+    }
+
+    return res.json({ notification: result.rows[0] });
+  } catch (error) {
+    console.error('Mark notification read error:', error);
+    return res.status(500).json({ message: 'Unable to update notification.' });
+  }
+});
+
+app.get('/api/admin/analytics', requireAuth, async (req, res) => {
+  try {
+    if (!['IT Staff', 'Administrator'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Not authorized.' });
+    }
+
+    const totalResult = await pool.query('SELECT COUNT(*) AS count FROM tickets');
+    const openResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'Open'");
+    const inProgressResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'In Progress'");
+    const resolvedResult = await pool.query("SELECT COUNT(*) AS count FROM tickets WHERE status = 'Resolved' OR status = 'Closed'");
+
+    const categoryResult = await pool.query(
+      `SELECT category, COUNT(*) AS count FROM tickets GROUP BY category ORDER BY count DESC LIMIT 8`
+    );
+
+    const statusResult = await pool.query(
+      `SELECT status, COUNT(*) AS count FROM tickets GROUP BY status ORDER BY count DESC`
+    );
+
+    const timeResult = await pool.query(
+      `SELECT DATE(created_at) AS date, COUNT(*) AS count FROM tickets GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 10`
+    );
+
+    return res.json({
+      totals: {
+        total: Number(totalResult.rows[0]?.count || 0),
+        open: Number(openResult.rows[0]?.count || 0),
+        inProgress: Number(inProgressResult.rows[0]?.count || 0),
+        resolved: Number(resolvedResult.rows[0]?.count || 0)
+      },
+      byCategory: categoryResult.rows,
+      byStatus: statusResult.rows,
+      overTime: timeResult.rows
+    });
+  } catch (error) {
+    console.error('Admin analytics error:', error);
+    return res.status(500).json({ message: 'Unable to load analytics.' });
+  }
+});
+
+app.use((error, _req, res, _next) => {
+  console.error('Unhandled server error:', error);
+  res.status(500).json({ message: 'Unexpected server error.' });
+});
+
+async function startServer() {
+  try {
+    await ensureSchema();
+    await seedDefaultAccounts();
+    app.listen(port, () => {
+      console.log(`CampusHelp API running on http://localhost:${port}`);
+    });
+  } catch (error) {
+    console.error('Failed to initialize CampusHelp server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
