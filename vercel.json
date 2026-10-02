@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/user/:path*", "destination": "/" },
+    { "source": "/staff/:path*", "destination": "/" },
+    { "source": "/admin/:path*", "destination": "/" },
+    { "source": "/login", "destination": "/" },
+    { "source": "/register", "destination": "/" },
+    { "source": "/change-password", "destination": "/" }
+  ]
+}
